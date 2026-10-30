@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="85" height="31" viewBox="0 0 85 31">
+  <g id="TRADEBOOK_" data-name="TRADEBOOK " transform="translate(-50 -195)">
+    <text id="Tradebook" transform="translate(70 208)" fill="#eee" font-size="12" font-family="Poppins-Regular, Poppins"><tspan x="0" y="0">Tradebook</tspan></text>
+    <path id="TRADEBOOK-2" data-name="TRADEBOOK" d="M21.768,73.412V72H14v1.412h2.472a2.114,2.114,0,0,1,1.988,1.412H14v1.412h4.46a2.114,2.114,0,0,1-1.988,1.412H14v1.7L17.945,83.3h2L15.7,79.062h.767a3.536,3.536,0,0,0,3.459-2.825h1.838V74.825H19.931a3.484,3.484,0,0,0-.653-1.412Z" transform="translate(36 126.35)" fill="#ffcf07"/>
+    <g id="NEW" transform="translate(-225 -158)">
+      <g id="Path_1234" data-name="Path 1234" transform="translate(295 372)" fill="none">
+        <path d="M5,0H25c2.761,0,5,2.686,5,6s-2.239,6-5,6H5C2.239,12,0,9.314,0,6S2.239,0,5,0Z" stroke="none"/>
+        <path d="M 5 0.5000009536743164 C 2.51869010925293 0.5000009536743164 0.5 2.967290878295898 0.5 6.000000476837158 C 0.5 9.032711029052734 2.51869010925293 11.5 5 11.5 L 25 11.5 C 27.48130989074707 11.5 29.5 9.032711029052734 29.5 6.000000476837158 C 29.5 2.967290878295898 27.48130989074707 0.5000009536743164 25 0.5000009536743164 L 5 0.5000009536743164 M 5 9.5367431640625e-07 L 25 9.5367431640625e-07 C 27.76141929626465 9.5367431640625e-07 30 2.686290740966797 30 6.000000476837158 C 30 9.31371021270752 27.76141929626465 12 25 12 L 5 12 C 2.238580703735352 12 0 9.31371021270752 0 6.000000476837158 C 0 2.686290740966797 2.238580703735352 9.5367431640625e-07 5 9.5367431640625e-07 Z" stroke="none" fill="#07f"/>
+      </g>
+      <text id="New-2" data-name="New" transform="translate(316.5 380)" fill="#eee" font-size="6" font-family="Poppins-Regular, Poppins"><tspan x="-12.858" y="0">New</tspan></text>
+    </g>
+  </g>
+</svg>

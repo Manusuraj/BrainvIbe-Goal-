@@ -1,0 +1,8 @@
+{
+  "name": "BrainVibe",
+  "description": "Personal finance, net worth, goals, expense tracker, credit card manager, tradebook, and market insights platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

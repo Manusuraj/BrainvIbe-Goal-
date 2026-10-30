@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="172.006" height="121" viewBox="0 0 172.006 121">
+  <g id="HISTORY" transform="translate(0)">
+    <rect id="Rectangle_137" data-name="Rectangle 137" width="133" height="12" transform="translate(20 73)" fill="#707070"/>
+    <rect id="Rectangle_138" data-name="Rectangle 138" width="79" height="9" transform="translate(26 58)" fill="#707070"/>
+    <path id="Path_1282" data-name="Path 1282" d="M125.411,73.124c-6.1,20.366-28.135,31.672-49.225,25.252s-33.244-28.134-27.148-48.5S77.174,18.2,98.263,24.624,131.507,52.758,125.411,73.124Z" fill="#707070" stroke="#9e9e9e" stroke-width="1" opacity="0.93"/>
+    <line id="Line_19" data-name="Line 19" x1="172" y2="1" transform="translate(0.003 101.5)" fill="none" stroke="#393a3c" stroke-width="1"/>
+    <circle id="Ellipse_29" data-name="Ellipse 29" cx="1.5" cy="1.5" r="1.5" transform="translate(145 30)" fill="#ffcf07"/>
+    <circle id="Ellipse_30" data-name="Ellipse 30" cx="1.5" cy="1.5" r="1.5" transform="translate(50 20)" fill="#ffcf07"/>
+    <ellipse id="Ellipse_31" data-name="Ellipse 31" cx="2" cy="1.5" rx="2" ry="1.5" transform="translate(81)" fill="#ffcf07"/>
+    <ellipse id="Ellipse_32" data-name="Ellipse 32" cx="2.5" cy="2" rx="2.5" ry="2" transform="translate(113 20)" fill="#ffcf07"/>
+    <path id="Path_1284" data-name="Path 1284" d="M87.168,94.281V76l-12.8,29.531L88.8,103.5,87.168,121l12.2-26.719h-12.2Z" fill="#ffcf07"/>
+  </g>
+</svg>
