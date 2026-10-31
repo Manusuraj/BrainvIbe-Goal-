@@ -7,48 +7,39 @@ import React, {
   useState,
 } from 'react';
 import {
-  CURATED_NEWS_ARTICLES,
-  FALLBACK_CRYPTO_INR,
-  INITIAL_BANKS,
-  INITIAL_CREDIT_CARDS,
-  INITIAL_EXPENSES,
-  INITIAL_GOALS,
-  INITIAL_INCOMES,
-  INITIAL_NOTIFICATIONS,
-  INITIAL_STORIES,
-  INITIAL_TRADE_FUNDS,
-  INITIAL_TRADE_LOGS,
-  INITIAL_USER_PROFILE,
-} from '../constants/brainvibeData';
-import {
   AuthStage,
-  BankAccount,
-  CreditCardItem,
-  CryptoCoin,
-  ExpenseItem,
+  GoalCycle,
   GoalItem,
-  IncomeItem,
+  GoalPreferences,
   MainTab,
-  NetworthPoint,
-  NewsArticle,
-  NotificationItem,
-  StorySlide,
   SubScreen,
   ToastMessage,
-  TradeFundItem,
-  TradeLogItem,
   UserProfile,
-  GoalPreferences,
 } from '../types/models';
+import {
+  auth,
+  db,
+  doc,
+  collection,
+  setDoc,
+  getDoc,
+  deleteDoc,
+  onSnapshot,
+  signInWithPopup,
+  signOut,
+  googleProvider,
+  onAuthStateChanged,
+  validateFirestoreConnection,
+} from '../services/firebase';
 import {
   computeDaysLeft,
   daysAgoIso,
-  detectCardNetwork,
-  getCycleDays,
+  daysAheadIso,
   todayIso,
 } from '../utils/formatters';
 
-const STORAGE_KEY = 'brainvibe_react_state_v1';
+const STORAGE_KEY = 'goal_app_state_v2';
+const GUEST_UID = 'guest-demo-user';
 
 export const DEFAULT_GOAL_PREFERENCES: GoalPreferences = {
   defaultCycle: 'Monthly',
@@ -57,140 +48,153 @@ export const DEFAULT_GOAL_PREFERENCES: GoalPreferences = {
   overdueAlerts: true,
   currency: 'INR',
   notifications: true,
-  biometrics: true,
+  biometrics: false,
 };
+
+export function currentMonthKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+export const INITIAL_USER_PROFILE: UserProfile = {
+  uid: '',
+  name: '',
+  email: '',
+  avatarUrl: '',
+  isPro: false,
+  planName: 'Free Plan',
+  subscriptionStatus: 'none',
+  dailyAiCount: 0,
+  dailyAiDate: todayIso(),
+  monthlyAiCount: 0,
+  monthlyAiMonth: currentMonthKey(),
+};
+
+export const INITIAL_SAMPLE_GOALS: GoalItem[] = [
+  {
+    id: 'goal-1',
+    title: 'Emergency Reserve (6 Months)',
+    description: 'High-yield liquid buffer for complete financial peace of mind',
+    goalAmount: 300000,
+    amountSaved: 195000,
+    targetDate: daysAheadIso(180),
+    createdAt: daysAgoIso(90),
+    paymentFrequency: 'Monthly',
+    category: 'Emergency',
+    completed: false,
+    transactions: [
+      { id: 'gt-1', amount: 120000, date: daysAgoIso(60), note: 'Initial salary allocation' },
+      { id: 'gt-2', amount: 75000, date: daysAgoIso(15), note: 'Monthly SIP transfer' },
+    ],
+  },
+  {
+    id: 'goal-2',
+    title: 'MacBook Pro M4 Workstation',
+    description: 'Hardware productivity upgrade funded strictly without EMI debt',
+    goalAmount: 185000,
+    amountSaved: 110000,
+    targetDate: daysAheadIso(95),
+    createdAt: daysAgoIso(45),
+    paymentFrequency: 'Weekly',
+    category: 'Gadgets',
+    completed: false,
+    transactions: [
+      { id: 'gt-3', amount: 60000, date: daysAgoIso(30), note: 'Freelance design project' },
+      { id: 'gt-4', amount: 50000, date: daysAgoIso(7), note: 'Weekly savings sweep' },
+    ],
+  },
+  {
+    id: 'goal-3',
+    title: 'Goa Scuba Certification Trip',
+    description: 'PADI Open Water diver certification course and beach stay',
+    goalAmount: 55000,
+    amountSaved: 55000,
+    targetDate: daysAgoIso(10),
+    createdAt: daysAgoIso(100),
+    paymentFrequency: 'Monthly',
+    category: 'Travel',
+    completed: true,
+    completedDate: daysAgoIso(12),
+    transactions: [
+      { id: 'gt-5', amount: 30000, date: daysAgoIso(50), note: 'Advance booking' },
+      { id: 'gt-6', amount: 25000, date: daysAgoIso(12), note: 'Final milestone completed' },
+    ],
+  },
+];
 
 interface PersistedState {
   authStage: AuthStage;
   user: UserProfile;
-  banks: BankAccount[];
-  incomes: IncomeItem[];
-  expenses: ExpenseItem[];
   goals: GoalItem[];
   goalPreferences: GoalPreferences;
-  creditCards: CreditCardItem[];
-  tradeFunds: TradeFundItem[];
-  tradeLogs: TradeLogItem[];
-  bookmarkedIds: string[];
-  notifications: NotificationItem[];
-}
-
-export interface TradeSummary {
-  totalDeposits: number;
-  totalWithdrawals: number;
-  netFund: number;
-  intradayProfit: number;
-  intradayLoss: number;
-  swingProfit: number;
-  swingLoss: number;
-  netPnL: number;
-  currentBalance: number;
-  returnPct: number;
+  hasSeenTutorial: boolean;
 }
 
 interface BrainVibeContextValue {
+  // Navigation
   activeTab: MainTab;
   setActiveTab: (tab: MainTab) => void;
   subScreen: SubScreen;
   openSubScreen: (screen: SubScreen) => void;
   closeSubScreen: () => void;
 
-  isStoriesOpen: boolean;
-  setIsStoriesOpen: (open: boolean) => void;
-  comingSoonFeature: { title: string; description: string } | null;
-  openComingSoon: (title: string, description: string) => void;
-  closeComingSoon: () => void;
-  activeArticle: NewsArticle | null;
-  setActiveArticle: (article: NewsArticle | null) => void;
-
+  // Auth & Profile
   authStage: AuthStage;
   setAuthStage: (stage: AuthStage) => void;
-  pendingPhone: string;
-  setPendingPhone: (phone: string) => void;
   user: UserProfile;
-  updateUser: (patch: Partial<UserProfile>) => void;
-  lockWithQpin: () => void;
-  logoutToOnboarding: () => void;
-  loginDemoAccount: () => void;
-  resetDemoData: () => void;
+  updateUser: (patch: Partial<UserProfile>) => Promise<void>;
+  loginWithGoogle: () => Promise<void>;
+  logout: () => Promise<void>;
+  isAuthLoading: boolean;
 
-  banks: BankAccount[];
-  incomes: IncomeItem[];
-  expenses: ExpenseItem[];
+  // Pro Subscription
+  upgradeToPro: (paymentIdOrPlan?: string) => Promise<boolean>;
+
+  // AI Usage & Limits
+  remainingAiMessages: number;
+  recordAiMessageSent: () => Promise<boolean>;
+
+  // Goals State & Actions
   goals: GoalItem[];
-  creditCards: CreditCardItem[];
-  tradeFunds: TradeFundItem[];
-  tradeLogs: TradeLogItem[];
-  stories: StorySlide[];
-  notifications: NotificationItem[];
-  markAllNotificationsRead: () => void;
+  goalPreferences: GoalPreferences;
+  updateGoalPreferences: (patch: Partial<GoalPreferences>) => void;
+  isAddGoalModalOpen: boolean;
+  setIsAddGoalModalOpen: (open: boolean) => void;
+  openAddGoalModal: () => void;
+  closeAddGoalModal: () => void;
 
-  totalBankBalance: number;
-  totalOtherIncome: number;
-  totalIncomeCombined: number;
-  totalExpenses: number;
-  totalCreditDue: number;
-  totalNetworth: number;
-  networthSeries: NetworthPoint[];
-  tradeSummary: TradeSummary;
-
-  addBank: (payload: Omit<BankAccount, 'id' | 'updatedAt'>) => void;
-  updateBank: (id: string, patch: Partial<BankAccount>) => void;
-  deleteBank: (id: string) => void;
-
-  addIncome: (payload: Omit<IncomeItem, 'id'>) => void;
-  updateIncome: (id: string, patch: Partial<IncomeItem>) => void;
-  deleteIncome: (id: string) => void;
-
-  addExpense: (payload: Omit<ExpenseItem, 'id'>) => void;
-  updateExpense: (id: string, patch: Partial<ExpenseItem>) => void;
-  deleteExpense: (id: string) => void;
-
+  // Goal Mutations
   addGoal: (
     payload: Omit<
       GoalItem,
       'id' | 'amountSaved' | 'createdAt' | 'completed' | 'transactions'
     >
-  ) => boolean;
-  updateGoal: (id: string, patch: Partial<GoalItem>) => boolean;
-  deleteGoal: (id: string) => void;
-  addGoalTransaction: (goalId: string, amount: number, note?: string) => void;
-  deleteGoalTransaction: (goalId: string, txId: string) => void;
-  isAddGoalModalOpen: boolean;
-  setIsAddGoalModalOpen: (open: boolean) => void;
-  openAddGoalModal: () => void;
+  ) => Promise<boolean>;
+  updateGoal: (id: string, patch: Partial<GoalItem>) => Promise<boolean>;
+  deleteGoal: (id: string) => Promise<void>;
+  addGoalTransaction: (goalId: string, amount: number, note?: string) => Promise<void>;
+  deleteGoalTransaction: (goalId: string, txId: string) => Promise<void>;
+
+  // Metrics
   totalGoalsTarget: number;
   totalGoalsSaved: number;
   activeGoalsCount: number;
   completedGoalsCount: number;
-  goalPreferences: GoalPreferences;
-  updateGoalPreferences: (patch: Partial<GoalPreferences>) => void;
+
+  // Data Management & Backups
   exportGoalsData: () => void;
-  importGoalsData: (jsonStr: string) => boolean;
+  importGoalsData: (jsonStr: string) => Promise<boolean>;
+  resetDemoData: () => void;
 
-  addCreditCard: (
-    payload: Omit<CreditCardItem, 'id' | 'network' | 'gradientIndex'>
-  ) => boolean;
-  updateCreditCard: (id: string, patch: Partial<CreditCardItem>) => void;
-  deleteCreditCard: (id: string) => void;
-  payCreditCardBill: (cardId: string, bankId: string, amount: number) => boolean;
+  // Tutorial / Onboarding
+  hasSeenTutorial: boolean;
+  openTutorial: () => void;
+  completeTutorial: () => void;
 
-  addTradeFund: (payload: Omit<TradeFundItem, 'id'>) => boolean;
-  deleteTradeFund: (id: string) => void;
-  addTradeLog: (payload: Omit<TradeLogItem, 'id'>) => boolean;
-  deleteTradeLog: (id: string) => void;
-  resetTradebook: () => void;
+  // Support
+  openEmailSupport: () => void;
 
-  newsArticles: NewsArticle[];
-  bookmarkedIds: string[];
-  toggleBookmark: (articleId: string) => void;
-  cryptoCoins: CryptoCoin[];
-  isCryptoLoading: boolean;
-  refreshCrypto: () => Promise<void>;
-
-  claimReferralReward: (friendCodeOrName?: string) => void;
-  activatePlanPreview: (plan: UserProfile['planName']) => void;
-
+  // Toast notifications
   toasts: ToastMessage[];
   showToast: (message: string, type?: ToastMessage['type']) => void;
   dismissToast: (id: string) => void;
@@ -198,25 +202,22 @@ interface BrainVibeContextValue {
 
 const BrainVibeContext = createContext<BrainVibeContextValue | null>(null);
 
-function getInitialPersistedState(): PersistedState {
+function getInitialLocalState(): PersistedState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as Partial<PersistedState>;
-      if (parsed && parsed.user && Array.isArray(parsed.banks)) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.user && Array.isArray(parsed.goals)) {
+        const isAuthenticated =
+          parsed.authStage === AuthStage.Authenticated &&
+          parsed.user.uid &&
+          parsed.user.uid !== GUEST_UID;
         return {
-          authStage: parsed.authStage ?? AuthStage.Authenticated,
+          authStage: isAuthenticated ? AuthStage.Authenticated : AuthStage.Welcome,
           user: { ...INITIAL_USER_PROFILE, ...parsed.user },
-          banks: parsed.banks,
-          incomes: parsed.incomes ?? INITIAL_INCOMES,
-          expenses: parsed.expenses ?? INITIAL_EXPENSES,
-          goals: parsed.goals ?? INITIAL_GOALS,
+          goals: parsed.goals,
           goalPreferences: parsed.goalPreferences ?? DEFAULT_GOAL_PREFERENCES,
-          creditCards: parsed.creditCards ?? INITIAL_CREDIT_CARDS,
-          tradeFunds: parsed.tradeFunds ?? INITIAL_TRADE_FUNDS,
-          tradeLogs: parsed.tradeLogs ?? INITIAL_TRADE_LOGS,
-          bookmarkedIds: parsed.bookmarkedIds ?? ['pro-art-1'],
-          notifications: parsed.notifications ?? INITIAL_NOTIFICATIONS,
+          hasSeenTutorial: parsed.hasSeenTutorial ?? true,
         };
       }
     }
@@ -225,608 +226,582 @@ function getInitialPersistedState(): PersistedState {
   }
 
   return {
-    authStage: AuthStage.Authenticated,
+    authStage: AuthStage.Welcome,
     user: INITIAL_USER_PROFILE,
-    banks: INITIAL_BANKS,
-    incomes: INITIAL_INCOMES,
-    expenses: INITIAL_EXPENSES,
-    goals: INITIAL_GOALS,
+    goals: INITIAL_SAMPLE_GOALS,
     goalPreferences: DEFAULT_GOAL_PREFERENCES,
-    creditCards: INITIAL_CREDIT_CARDS,
-    tradeFunds: INITIAL_TRADE_FUNDS,
-    tradeLogs: INITIAL_TRADE_LOGS,
-    bookmarkedIds: ['pro-art-1'],
-    notifications: INITIAL_NOTIFICATIONS,
+    hasSeenTutorial: false,
   };
 }
 
 export const BrainVibeProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const [persisted, setPersisted] = useState<PersistedState>(
-    getInitialPersistedState
-  );
+  const [persisted, setPersisted] = useState<PersistedState>(getInitialLocalState);
   const [activeTab, setActiveTabState] = useState<MainTab>(MainTab.Goals);
-  const [isAddGoalModalOpen, setIsAddGoalModalOpen] = useState(false);
   const [subScreen, setSubScreen] = useState<SubScreen>(SubScreen.None);
-  const [pendingPhone, setPendingPhone] = useState<string>(
-    INITIAL_USER_PROFILE.phoneNumber
-  );
-
-  const [isStoriesOpen, setIsStoriesOpen] = useState(false);
-  const [comingSoonFeature, setComingSoonFeature] = useState<{
-    title: string;
-    description: string;
-  } | null>(null);
-  const [activeArticle, setActiveArticle] = useState<NewsArticle | null>(null);
-
-  const [newsArticles, setNewsArticles] =
-    useState<NewsArticle[]>(CURATED_NEWS_ARTICLES);
-  const [cryptoCoins, setCryptoCoins] =
-    useState<CryptoCoin[]>(FALLBACK_CRYPTO_INR);
-  const [isCryptoLoading, setIsCryptoLoading] = useState(false);
+  const [isAddGoalModalOpen, setIsAddGoalModalOpen] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
-    } catch {
-      // ignore
-    }
-  }, [persisted]);
-
-  const showToast = useCallback(
-    (message: string, type: ToastMessage['type'] = 'info') => {
-      const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      setToasts((prev) => [...prev.slice(-2), { id, message, type }]);
-      window.setTimeout(() => {
-        setToasts((prev) => prev.filter((t) => t.id !== id));
-      }, 3600);
-    },
-    []
-  );
+  // Show Toast
+  const showToast = useCallback((message: string, type: ToastMessage['type'] = 'info') => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setToasts((prev) => [...prev, { id, message, type }]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 3800);
+  }, []);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const setActiveTab = useCallback((tab: MainTab) => {
-    setActiveTabState(tab);
-    setSubScreen(SubScreen.None);
-  }, []);
-
-  const openSubScreen = useCallback((screen: SubScreen) => {
-    setSubScreen(screen);
-  }, []);
-
-  const closeSubScreen = useCallback(() => {
-    setSubScreen(SubScreen.None);
-  }, []);
-
-  const openComingSoon = useCallback((title: string, description: string) => {
-    setComingSoonFeature({ title, description });
-  }, []);
-
-  const closeComingSoon = useCallback(() => {
-    setComingSoonFeature(null);
-  }, []);
-
-  const refreshCrypto = useCallback(async () => {
-    setIsCryptoLoading(true);
-    try {
-      const ids =
-        'bitcoin,ethereum,solana,binancecoin,ripple,cardano,dogecoin,polkadot,chainlink,litecoin';
-      const res = await fetch(
-        `https://api.coingecko.com/api/v3/coins/markets?vs_currency=inr&ids=${ids}&order=market_cap_desc&per_page=10&page=1&sparkline=false`,
-        { signal: AbortSignal.timeout(6000) }
-      );
-      if (res.ok) {
-        const data = (await res.json()) as Array<{
-          id: string;
-          name: string;
-          symbol: string;
-          current_price: number;
-          price_change_percentage_24h: number;
-          market_cap?: number;
-        }>;
-        if (Array.isArray(data) && data.length > 0) {
-          setCryptoCoins(
-            data.map((c) => ({
-              id: c.id,
-              name: c.name,
-              symbol: c.symbol.toUpperCase(),
-              priceInr: Number(c.current_price) || 0,
-              change24h: Number(c.price_change_percentage_24h) || 0,
-              marketCapInr: c.market_cap,
-            }))
-          );
-        }
-      }
-    } catch {
-      // retain fallback
-    } finally {
-      setIsCryptoLoading(false);
-    }
-  }, []);
-
+  // Save local state backup whenever persisted changes
   useEffect(() => {
-    refreshCrypto();
-    const apiKey = import.meta.env.VITE_NEWSDATA_API_KEY;
-    if (!apiKey) return;
-    (async () => {
-      try {
-        const res = await fetch(
-          `https://newsdata.io/api/1/news?apikey=${encodeURIComponent(
-            apiKey
-          )}&country=in&language=en&category=business,technology`
-        );
-        if (!res.ok) return;
-        const json = await res.json();
-        if (Array.isArray(json?.results) && json.results.length > 0) {
-          const fetched: NewsArticle[] = json.results
-            .slice(0, 8)
-            .map((item: Record<string, unknown>, idx: number) => ({
-              id: `live-news-${idx}`,
-              title: String(item.title || 'Market Update'),
-              description: String(
-                item.description || 'Tap to read full financial briefing.'
-              ),
-              content: String(
-                item.content ||
-                  item.description ||
-                  'Full story available from publisher.'
-              ),
-              source: String(item.source_id || 'India Wire'),
-              publishedAt: String(item.pubDate || todayIso()).slice(0, 10),
-              category:
-                Array.isArray(item.category) &&
-                item.category.includes('technology')
-                  ? 'technology'
-                  : idx % 2 === 0
-                  ? 'top'
-                  : 'business',
-              imageUrl:
-                typeof item.image_url === 'string' ? item.image_url : undefined,
-              url: typeof item.link === 'string' ? item.link : undefined,
-            }));
-          setNewsArticles([
-            ...CURATED_NEWS_ARTICLES.filter((a) => a.category === 'pro'),
-            ...fetched,
-          ]);
-        }
-      } catch {
-        // retain
-      }
-    })();
-  }, [refreshCrypto]);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+    } catch {
+      // ignore quota errors
+    }
+  }, [persisted]);
 
-  const setAuthStage = useCallback((stage: AuthStage) => {
-    setPersisted((prev) => ({ ...prev, authStage: stage }));
+  // Test Firestore connection on boot
+  useEffect(() => {
+    validateFirestoreConnection();
   }, []);
 
-  const updateUser = useCallback(
-    (patch: Partial<UserProfile>) => {
+  // Listen to Firebase Auth state
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        const uid = firebaseUser.uid;
+        try {
+          const userDocRef = doc(db, 'users', uid);
+          const snap = await getDoc(userDocRef);
+
+          let profileData: UserProfile;
+          const currentMonth = currentMonthKey();
+          const today = todayIso();
+          const nowIso = new Date().toISOString();
+
+          if (snap.exists()) {
+            const data = snap.data() as Partial<UserProfile>;
+            let isPro = Boolean(data.isPro);
+            let subStatus: 'active' | 'expired' | 'none' = data.subscriptionStatus || (isPro ? 'active' : 'none');
+            let planName = data.planName || (isPro ? 'Premium Annual' : 'Free Plan');
+
+            // Handle subscription expiry check
+            if (isPro && data.subscriptionExpiry && nowIso > data.subscriptionExpiry) {
+              isPro = false;
+              subStatus = 'expired';
+              planName = 'Free Plan';
+              try {
+                await setDoc(
+                  userDocRef,
+                  {
+                    isPro: false,
+                    subscriptionStatus: 'expired',
+                    planName: 'Free Plan',
+                  },
+                  { merge: true }
+                );
+              } catch {
+                // ignore
+              }
+            }
+
+            profileData = {
+              uid,
+              name: data.name || firebaseUser.displayName || 'Goal Achiever',
+              email: data.email || firebaseUser.email || '',
+              avatarUrl: data.avatarUrl || firebaseUser.photoURL || '',
+              isPro,
+              planName,
+              subscriptionStatus: subStatus,
+              subscriptionActivatedAt: data.subscriptionActivatedAt,
+              subscriptionExpiry: data.subscriptionExpiry,
+              lastPaymentId: data.lastPaymentId,
+              dailyAiCount: data.dailyAiDate === today ? (data.dailyAiCount || 0) : 0,
+              dailyAiDate: today,
+              monthlyAiCount: data.monthlyAiMonth === currentMonth ? (data.monthlyAiCount || 0) : 0,
+              monthlyAiMonth: currentMonth,
+              city: data.city || 'India',
+              country: data.country || 'India',
+              phoneNumber: data.phoneNumber || '',
+            };
+          } else {
+            profileData = {
+              uid,
+              name: firebaseUser.displayName || 'Goal Achiever',
+              email: firebaseUser.email || '',
+              avatarUrl: firebaseUser.photoURL || '',
+              isPro: false,
+              planName: 'Free Plan',
+              subscriptionStatus: 'none',
+              dailyAiCount: 0,
+              dailyAiDate: today,
+              monthlyAiCount: 0,
+              monthlyAiMonth: currentMonth,
+            };
+            await setDoc(userDocRef, profileData);
+
+            // Seed initial goals in Firestore for new user if empty
+            for (const sampleGoal of INITIAL_SAMPLE_GOALS) {
+              await setDoc(doc(db, 'users', uid, 'goals', sampleGoal.id), sampleGoal);
+            }
+          }
+
+          setPersisted((prev) => ({
+            ...prev,
+            authStage: AuthStage.Authenticated,
+            user: profileData,
+          }));
+        } catch (err) {
+          console.warn('Could not sync user profile from Firestore:', err);
+        }
+      } else {
+        setPersisted((prev) => ({
+          ...prev,
+          authStage: AuthStage.Welcome,
+        }));
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Real-time Firestore sync for goals
+  useEffect(() => {
+    const uid = persisted.user?.uid;
+    if (!uid || uid === GUEST_UID) return;
+
+    try {
+      const goalsColRef = collection(db, 'users', uid, 'goals');
+      const unsubscribe = onSnapshot(goalsColRef, (snapshot) => {
+        const remoteGoals: GoalItem[] = [];
+        snapshot.forEach((docSnap) => {
+          remoteGoals.push(docSnap.data() as GoalItem);
+        });
+        setPersisted((prev) => ({
+          ...prev,
+          goals: remoteGoals,
+        }));
+      });
+
+      return () => unsubscribe();
+    } catch (err) {
+      console.warn('Realtime goals sync error:', err);
+    }
+  }, [persisted.user?.uid]);
+
+  // Remaining AI messages calculation:
+  // Paid/Premium: 100 messages per billing month
+  // Free: 5 messages per day
+  const remainingAiMessages = useMemo(() => {
+    if (persisted.user.isPro) {
+      const isCurrentMonth = persisted.user.monthlyAiMonth === currentMonthKey();
+      const count = isCurrentMonth ? (persisted.user.monthlyAiCount || 0) : 0;
+      return Math.max(0, 100 - count);
+    }
+    const isToday = persisted.user.dailyAiDate === todayIso();
+    const count = isToday ? (persisted.user.dailyAiCount || 0) : 0;
+    return Math.max(0, 5 - count);
+  }, [
+    persisted.user.isPro,
+    persisted.user.monthlyAiCount,
+    persisted.user.monthlyAiMonth,
+    persisted.user.dailyAiCount,
+    persisted.user.dailyAiDate,
+  ]);
+
+  // Record an AI message sent
+  const recordAiMessageSent = useCallback(async (): Promise<boolean> => {
+    if (persisted.user.isPro) {
+      const monthKey = currentMonthKey();
+      const isCurrentMonth = persisted.user.monthlyAiMonth === monthKey;
+      const currentCount = isCurrentMonth ? (persisted.user.monthlyAiCount || 0) : 0;
+
+      if (currentCount >= 100) {
+        showToast('Monthly limit reached (100/100). Allowance resets on the 1st of next month.', 'error');
+        return false;
+      }
+
+      const nextCount = currentCount + 1;
+      const patch = {
+        monthlyAiCount: nextCount,
+        monthlyAiMonth: monthKey,
+      };
+
       setPersisted((prev) => ({
         ...prev,
         user: { ...prev.user, ...patch },
       }));
+
+      if (persisted.user.uid && persisted.user.uid !== GUEST_UID) {
+        try {
+          await setDoc(doc(db, 'users', persisted.user.uid), patch, { merge: true });
+        } catch {
+          // ignore
+        }
+      }
+
+      return true;
+    }
+
+    const isToday = persisted.user.dailyAiDate === todayIso();
+    const currentCount = isToday ? (persisted.user.dailyAiCount || 0) : 0;
+
+    if (currentCount >= 5) {
+      showToast('Daily free limit reached (5/5). Upgrade to Premium (₹499/year) for 100 monthly chats & zero ads!', 'error');
+      setSubScreen(SubScreen.ProUpgrade);
+      return false;
+    }
+
+    const nextCount = currentCount + 1;
+    const patch = {
+      dailyAiCount: nextCount,
+      dailyAiDate: todayIso(),
+    };
+
+    setPersisted((prev) => ({
+      ...prev,
+      user: { ...prev.user, ...patch },
+    }));
+
+    if (persisted.user.uid && persisted.user.uid !== GUEST_UID) {
+      try {
+        await setDoc(doc(db, 'users', persisted.user.uid), patch, { merge: true });
+      } catch {
+        // ignore
+      }
+    }
+
+    return true;
+  }, [
+    persisted.user.isPro,
+    persisted.user.monthlyAiCount,
+    persisted.user.monthlyAiMonth,
+    persisted.user.dailyAiCount,
+    persisted.user.dailyAiDate,
+    persisted.user.uid,
+    showToast,
+  ]);
+
+  // Google Login
+  const loginWithGoogle = useCallback(async () => {
+    setIsAuthLoading(true);
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
+      showToast(`Welcome, ${user.displayName || 'friend'}!`, 'success');
+      setPersisted((prev) => ({
+        ...prev,
+        authStage: AuthStage.Authenticated,
+      }));
+    } catch (error: any) {
+      console.error('Google Sign-In error:', error);
+      showToast(error.message || 'Google Sign-In failed. Please try again.', 'error');
+    } finally {
+      setIsAuthLoading(false);
+    }
+  }, [showToast]);
+
+  // Logout
+  const logout = useCallback(async () => {
+    try {
+      await signOut(auth);
+    } catch {
+      // ignore
+    }
+    setPersisted((prev) => ({
+      ...prev,
+      authStage: AuthStage.Welcome,
+    }));
+    showToast('Logged out successfully', 'info');
+  }, [showToast]);
+
+  // Upgrade to Pro (Premium Annual - ₹499/year)
+  const upgradeToPro = useCallback(
+    async (paymentIdOrPlan?: string): Promise<boolean> => {
+      const paymentId =
+        paymentIdOrPlan && paymentIdOrPlan.startsWith('pay_')
+          ? paymentIdOrPlan
+          : `pay_rzp_${Date.now()}`;
+
+      const now = new Date();
+      const activatedAt = now.toISOString();
+      const expiresAt = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
+      const currentMonth = currentMonthKey();
+
+      const patch: Partial<UserProfile> = {
+        isPro: true,
+        planName: 'Premium Annual',
+        subscriptionStatus: 'active',
+        subscriptionActivatedAt: activatedAt,
+        subscriptionExpiry: expiresAt,
+        lastPaymentId: paymentId,
+        monthlyAiCount: 0,
+        monthlyAiMonth: currentMonth,
+      };
+
+      setPersisted((prev) => ({
+        ...prev,
+        user: { ...prev.user, ...patch },
+      }));
+
+      if (persisted.user.uid && persisted.user.uid !== GUEST_UID) {
+        try {
+          await setDoc(doc(db, 'users', persisted.user.uid), patch, { merge: true });
+
+          // Record payment receipt in Firestore
+          await setDoc(doc(db, 'users', persisted.user.uid, 'payments', paymentId), {
+            paymentId,
+            amount: 499,
+            amountPaise: 49900,
+            currency: 'INR',
+            planName: 'Premium Annual',
+            status: 'captured',
+            activatedAt,
+            expiresAt,
+            userId: persisted.user.uid,
+            createdAt: activatedAt,
+          });
+        } catch (err) {
+          console.warn('Firestore subscription update error:', err);
+        }
+      }
+
+      setSubScreen(SubScreen.None);
+      showToast('🎉 Premium Annual activated! 100 AI chats/mo, backup access & zero ads!', 'success');
+      return true;
+    },
+    [persisted.user.uid, showToast]
+  );
+
+  // Update User Profile
+  const updateUser = useCallback(
+    async (patch: Partial<UserProfile>) => {
+      setPersisted((prev) => ({
+        ...prev,
+        user: { ...prev.user, ...patch },
+      }));
+
+      if (persisted.user.uid && persisted.user.uid !== GUEST_UID) {
+        try {
+          await setDoc(doc(db, 'users', persisted.user.uid), patch, { merge: true });
+        } catch {
+          // ignore
+        }
+      }
       showToast('Profile updated', 'success');
     },
-    [showToast]
+    [persisted.user.uid, showToast]
   );
 
-  const lockWithQpin = useCallback(() => {
-    setSubScreen(SubScreen.None);
-    setPersisted((prev) => ({ ...prev, authStage: AuthStage.UnlockQpin }));
-  }, []);
-
-  const logoutToOnboarding = useCallback(() => {
-    setSubScreen(SubScreen.None);
-    setActiveTabState(MainTab.Home);
-    setPersisted((prev) => ({ ...prev, authStage: AuthStage.Onboarding }));
-  }, []);
-
-  const loginDemoAccount = useCallback(() => {
-    setPersisted((prev) => ({
-      ...prev,
-      authStage: AuthStage.Authenticated,
-    }));
-    showToast('Signed in to BrainVibe', 'success');
-  }, [showToast]);
-
-  const resetDemoData = useCallback(() => {
-    const fresh: PersistedState = {
-      authStage: AuthStage.Authenticated,
-      user: INITIAL_USER_PROFILE,
-      banks: INITIAL_BANKS,
-      incomes: INITIAL_INCOMES,
-      expenses: INITIAL_EXPENSES,
-      goals: INITIAL_GOALS,
-      goalPreferences: DEFAULT_GOAL_PREFERENCES,
-      creditCards: INITIAL_CREDIT_CARDS,
-      tradeFunds: INITIAL_TRADE_FUNDS,
-      tradeLogs: INITIAL_TRADE_LOGS,
-      bookmarkedIds: ['pro-art-1'],
-      notifications: INITIAL_NOTIFICATIONS,
-    };
-    setPersisted(fresh);
-    setSubScreen(SubScreen.None);
-    setActiveTabState(MainTab.Goals);
-    showToast('Demo goals & settings restored', 'success');
-  }, [showToast]);
-
-  const markAllNotificationsRead = useCallback(() => {
-    setPersisted((prev) => ({
-      ...prev,
-      notifications: prev.notifications.map((n) => ({ ...n, read: true })),
-    }));
-  }, []);
-
-  const totalBankBalance = useMemo(
-    () => persisted.banks.reduce((sum, b) => sum + b.balance, 0),
-    [persisted.banks]
-  );
-
-  const totalOtherIncome = useMemo(
-    () => persisted.incomes.reduce((sum, i) => sum + i.amount, 0),
-    [persisted.incomes]
-  );
-
-  const totalIncomeCombined = useMemo(
-    () => totalBankBalance + totalOtherIncome,
-    [totalBankBalance, totalOtherIncome]
-  );
-
-  const totalExpenses = useMemo(
-    () => persisted.expenses.reduce((sum, e) => sum + e.amount, 0),
-    [persisted.expenses]
-  );
-
-  const totalCreditDue = useMemo(
-    () =>
-      persisted.creditCards.reduce((sum, c) => sum + c.outstandingAmount, 0),
-    [persisted.creditCards]
-  );
-
-  const totalNetworth = useMemo(
-    () => totalBankBalance + totalOtherIncome - totalExpenses,
-    [totalBankBalance, totalOtherIncome, totalExpenses]
-  );
-
-  const tradeSummary = useMemo<TradeSummary>(() => {
-    let totalDeposits = 0;
-    let totalWithdrawals = 0;
-    for (const f of persisted.tradeFunds) {
-      if (f.type === 'deposit') totalDeposits += f.amount;
-      else totalWithdrawals += f.amount;
-    }
-    const netFund = Math.max(0, totalDeposits - totalWithdrawals);
-
-    let intradayProfit = 0;
-    let intradayLoss = 0;
-    let swingProfit = 0;
-    let swingLoss = 0;
-
-    for (const t of persisted.tradeLogs) {
-      if (t.segment === 'intraday') {
-        if (t.result === 'profit') intradayProfit += t.amount;
-        else intradayLoss += t.amount;
-      } else {
-        if (t.result === 'profit') swingProfit += t.amount;
-        else swingLoss += t.amount;
-      }
-    }
-
-    const netPnL =
-      intradayProfit + swingProfit - (intradayLoss + swingLoss);
-    const currentBalance = netFund + netPnL;
-    const returnPct = netFund > 0 ? (netPnL / netFund) * 100 : 0;
-
-    return {
-      totalDeposits,
-      totalWithdrawals,
-      netFund,
-      intradayProfit,
-      intradayLoss,
-      swingProfit,
-      swingLoss,
-      netPnL,
-      currentBalance,
-      returnPct,
-    };
-  }, [persisted.tradeFunds, persisted.tradeLogs]);
-
-  const networthSeries = useMemo<NetworthPoint[]>(() => {
-    const base = Math.max(0, totalNetworth);
-    const factors = [0.81, 0.85, 0.84, 0.89, 0.93, 0.97, 1.0];
-    const labels = ['6M', '5M', '4M', '3M', '2M', '1M', 'Now'];
-    return factors.map((f, idx) => ({
-      label: labels[idx],
-      date: daysAgoIso((6 - idx) * 30),
-      value: Math.round(base * f),
-    }));
-  }, [totalNetworth]);
-
-  const addBank = useCallback(
-    (payload: Omit<BankAccount, 'id' | 'updatedAt'>) => {
-      const item: BankAccount = {
-        ...payload,
-        id: `bank-${Date.now()}`,
-        updatedAt: todayIso(),
-      };
-      setPersisted((prev) => ({ ...prev, banks: [item, ...prev.banks] }));
-      showToast(`${payload.bankName} account added`, 'success');
-    },
-    [showToast]
-  );
-
-  const updateBank = useCallback(
-    (id: string, patch: Partial<BankAccount>) => {
-      setPersisted((prev) => ({
-        ...prev,
-        banks: prev.banks.map((b) =>
-          b.id === id ? { ...b, ...patch, updatedAt: todayIso() } : b
-        ),
-      }));
-      showToast('Bank balance updated', 'success');
-    },
-    [showToast]
-  );
-
-  const deleteBank = useCallback(
-    (id: string) => {
-      setPersisted((prev) => ({
-        ...prev,
-        banks: prev.banks.filter((b) => b.id !== id),
-      }));
-      showToast('Bank account removed', 'info');
-    },
-    [showToast]
-  );
-
-  const addIncome = useCallback(
-    (payload: Omit<IncomeItem, 'id'>) => {
-      const item: IncomeItem = { ...payload, id: `inc-${Date.now()}` };
-      setPersisted((prev) => ({
-        ...prev,
-        incomes: [item, ...prev.incomes],
-      }));
-      showToast('Income entry added', 'success');
-    },
-    [showToast]
-  );
-
-  const updateIncome = useCallback(
-    (id: string, patch: Partial<IncomeItem>) => {
-      setPersisted((prev) => ({
-        ...prev,
-        incomes: prev.incomes.map((inc) =>
-          inc.id === id ? { ...inc, ...patch } : inc
-        ),
-      }));
-      showToast('Income entry updated', 'success');
-    },
-    [showToast]
-  );
-
-  const deleteIncome = useCallback(
-    (id: string) => {
-      setPersisted((prev) => ({
-        ...prev,
-        incomes: prev.incomes.filter((inc) => inc.id !== id),
-      }));
-      showToast('Income entry deleted', 'info');
-    },
-    [showToast]
-  );
-
-  const addExpense = useCallback(
-    (payload: Omit<ExpenseItem, 'id'>) => {
-      const item: ExpenseItem = { ...payload, id: `exp-${Date.now()}` };
-      setPersisted((prev) => {
-        let nextBanks = prev.banks;
-        let nextCards = prev.creditCards;
-
-        if (payload.paymentMode === 'Bank' && payload.sourceId) {
-          nextBanks = prev.banks.map((b) =>
-            b.id === payload.sourceId
-              ? { ...b, balance: Math.max(0, b.balance - payload.amount) }
-              : b
-          );
-        } else if (payload.paymentMode === 'Credit Card' && payload.sourceId) {
-          nextCards = prev.creditCards.map((c) =>
-            c.id === payload.sourceId
-              ? { ...c, outstandingAmount: c.outstandingAmount + payload.amount }
-              : c
-          );
-        }
-
-        return {
-          ...prev,
-          banks: nextBanks,
-          creditCards: nextCards,
-          expenses: [item, ...prev.expenses],
-        };
-      });
-      showToast('Expense recorded', 'success');
-    },
-    [showToast]
-  );
-
-  const updateExpense = useCallback(
-    (id: string, patch: Partial<ExpenseItem>) => {
-      setPersisted((prev) => ({
-        ...prev,
-        expenses: prev.expenses.map((e) =>
-          e.id === id ? { ...e, ...patch } : e
-        ),
-      }));
-      showToast('Expense updated', 'success');
-    },
-    [showToast]
-  );
-
-  const deleteExpense = useCallback(
-    (id: string) => {
-      setPersisted((prev) => ({
-        ...prev,
-        expenses: prev.expenses.filter((e) => e.id !== id),
-      }));
-      showToast('Expense deleted', 'info');
-    },
-    [showToast]
-  );
-
-  const addGoal = useCallback(
-    (
-      payload: Omit<
-        GoalItem,
-        'id' | 'amountSaved' | 'createdAt' | 'completed' | 'transactions'
-      >
-    ): boolean => {
-      const daysLeft = computeDaysLeft(payload.targetDate);
-      const minDays = getCycleDays(payload.paymentFrequency);
-      if (daysLeft <= minDays) {
-        showToast(
-          `Target date must be more than ${minDays} days ahead for ${payload.paymentFrequency} cycle`,
-          'error'
-        );
-        return false;
-      }
-
-      const goal: GoalItem = {
-        ...payload,
-        id: `goal-${Date.now()}`,
-        amountSaved: 0,
-        createdAt: todayIso(),
-        completed: false,
-        transactions: [],
-      };
-      setPersisted((prev) => ({ ...prev, goals: [goal, ...prev.goals] }));
-      showToast('Goal created! Stay consistent.', 'success');
-      return true;
-    },
-    [showToast]
-  );
-
-  const updateGoal = useCallback(
-    (id: string, patch: Partial<GoalItem>): boolean => {
-      setPersisted((prev) => ({
-        ...prev,
-        goals: prev.goals.map((g) => {
-          if (g.id !== id) return g;
-          const updated = { ...g, ...patch };
-          if (updated.amountSaved >= updated.goalAmount && !updated.completed) {
-            updated.completed = true;
-            updated.completedDate = todayIso();
-          }
-          return updated;
-        }),
-      }));
-      showToast('Goal updated', 'success');
-      return true;
-    },
-    [showToast]
-  );
-
-  const deleteGoal = useCallback(
-    (id: string) => {
-      setPersisted((prev) => ({
-        ...prev,
-        goals: prev.goals.filter((g) => g.id !== id),
-      }));
-      showToast('Goal deleted', 'info');
-    },
-    [showToast]
-  );
-
-  const addGoalTransaction = useCallback(
-    (goalId: string, amount: number, note?: string) => {
-      if (amount <= 0) {
-        showToast('Enter a valid contribution amount', 'error');
-        return;
-      }
-      let completedJustNow = false;
-      setPersisted((prev) => {
-        const nextGoals = prev.goals.map((g) => {
-          if (g.id !== goalId) return g;
-          const nextSaved = g.amountSaved + amount;
-          const isNowDone = nextSaved >= g.goalAmount;
-          if (isNowDone && !g.completed) completedJustNow = true;
-          return {
-            ...g,
-            amountSaved: nextSaved,
-            completed: isNowDone || g.completed,
-            completedDate:
-              isNowDone && !g.completedDate ? todayIso() : g.completedDate,
-            transactions: [
-              {
-                id: `gt-${Date.now()}`,
-                amount,
-                date: todayIso(),
-                note: note || 'Goal deposit',
-              },
-              ...g.transactions,
-            ],
-          };
-        });
-        return {
-          ...prev,
-          user: completedJustNow
-            ? { ...prev.user, bvCoins: prev.user.bvCoins + 25 }
-            : prev.user,
-          goals: nextGoals,
-        };
-      });
-      if (completedJustNow) {
-        showToast(
-          'Goal completed! Moved to Completed tab (+25 BV Coins)',
-          'success'
-        );
-      } else {
-        showToast('Savings contribution added to goal', 'success');
-      }
-    },
-    [showToast]
-  );
-
-  const deleteGoalTransaction = useCallback(
-    (goalId: string, txId: string) => {
-      setPersisted((prev) => ({
-        ...prev,
-        goals: prev.goals.map((g) => {
-          if (g.id !== goalId) return g;
-          const tx = g.transactions.find((t) => t.id === txId);
-          const deducted = tx ? tx.amount : 0;
-          const newSaved = Math.max(0, g.amountSaved - deducted);
-          return {
-            ...g,
-            amountSaved: newSaved,
-            completed: newSaved >= g.goalAmount,
-            transactions: g.transactions.filter((t) => t.id !== txId),
-          };
-        }),
-      }));
-      showToast('Contribution removed', 'info');
-    },
-    [showToast]
-  );
-
-  const openAddGoalModal = useCallback(() => {
-    setIsAddGoalModalOpen(true);
-  }, []);
-
+  // Update Goal Preferences
   const updateGoalPreferences = useCallback(
     (patch: Partial<GoalPreferences>) => {
       setPersisted((prev) => ({
         ...prev,
         goalPreferences: { ...prev.goalPreferences, ...patch },
       }));
-      showToast('Goal settings updated', 'success');
+      showToast('Preferences updated', 'success');
     },
     [showToast]
   );
 
+  // Add Goal
+  const addGoal = useCallback(
+    async (
+      payload: Omit<
+        GoalItem,
+        'id' | 'amountSaved' | 'createdAt' | 'completed' | 'transactions'
+      >
+    ): Promise<boolean> => {
+      const daysLeft = computeDaysLeft(payload.targetDate);
+      if (daysLeft < 1) {
+        showToast('Please select a target date in the future', 'error');
+        return false;
+      }
+
+      const id = `goal-${Date.now()}`;
+      const newGoal: GoalItem = {
+        ...payload,
+        id,
+        amountSaved: 0,
+        createdAt: todayIso(),
+        completed: false,
+        transactions: [],
+      };
+
+      setPersisted((prev) => ({
+        ...prev,
+        goals: [newGoal, ...prev.goals],
+      }));
+
+      if (persisted.user.uid && persisted.user.uid !== GUEST_UID) {
+        try {
+          await setDoc(doc(db, 'users', persisted.user.uid, 'goals', id), newGoal);
+        } catch (err) {
+          console.warn('Firestore write failed, goal preserved locally:', err);
+        }
+      }
+
+      setIsAddGoalModalOpen(false);
+      showToast('Goal created! AI plan active.', 'success');
+      return true;
+    },
+    [persisted.user.uid, showToast]
+  );
+
+  // Update Goal
+  const updateGoal = useCallback(
+    async (id: string, patch: Partial<GoalItem>): Promise<boolean> => {
+      let updatedGoal: GoalItem | null = null;
+
+      setPersisted((prev) => {
+        const nextGoals = prev.goals.map((g) => {
+          if (g.id !== id) return g;
+          const updated = { ...g, ...patch };
+          if (updated.amountSaved >= updated.goalAmount && !updated.completed) {
+            updated.completed = true;
+            updated.completedDate = todayIso();
+          }
+          updatedGoal = updated;
+          return updated;
+        });
+        return { ...prev, goals: nextGoals };
+      });
+
+      if (updatedGoal && persisted.user.uid && persisted.user.uid !== GUEST_UID) {
+        try {
+          await setDoc(doc(db, 'users', persisted.user.uid, 'goals', id), updatedGoal, {
+            merge: true,
+          });
+        } catch {
+          // ignore
+        }
+      }
+
+      showToast('Goal updated', 'success');
+      return true;
+    },
+    [persisted.user.uid, showToast]
+  );
+
+  // Delete Goal
+  const deleteGoal = useCallback(
+    async (id: string) => {
+      setPersisted((prev) => ({
+        ...prev,
+        goals: prev.goals.filter((g) => g.id !== id),
+      }));
+
+      if (persisted.user.uid && persisted.user.uid !== GUEST_UID) {
+        try {
+          await deleteDoc(doc(db, 'users', persisted.user.uid, 'goals', id));
+        } catch {
+          // ignore
+        }
+      }
+      showToast('Goal removed', 'info');
+    },
+    [persisted.user.uid, showToast]
+  );
+
+  // Add Savings / Contribution Transaction
+  const addGoalTransaction = useCallback(
+    async (goalId: string, amount: number, note?: string) => {
+      if (amount <= 0) {
+        showToast('Please enter a valid savings amount', 'error');
+        return;
+      }
+
+      let isNowCompleted = false;
+      let targetGoal: GoalItem | null = null;
+
+      setPersisted((prev) => {
+        const nextGoals = prev.goals.map((g) => {
+          if (g.id !== goalId) return g;
+          const nextSaved = g.amountSaved + amount;
+          const completed = nextSaved >= g.goalAmount;
+          if (completed && !g.completed) isNowCompleted = true;
+
+          const updated: GoalItem = {
+            ...g,
+            amountSaved: nextSaved,
+            completed: completed || g.completed,
+            completedDate: completed && !g.completedDate ? todayIso() : g.completedDate,
+            transactions: [
+              {
+                id: `gt-${Date.now()}`,
+                amount,
+                date: todayIso(),
+                note: note || 'Savings contribution',
+              },
+              ...g.transactions,
+            ],
+          };
+          targetGoal = updated;
+          return updated;
+        });
+        return { ...prev, goals: nextGoals };
+      });
+
+      if (targetGoal && persisted.user.uid && persisted.user.uid !== GUEST_UID) {
+        try {
+          await setDoc(doc(db, 'users', persisted.user.uid, 'goals', goalId), targetGoal);
+        } catch {
+          // ignore
+        }
+      }
+
+      if (isNowCompleted) {
+        showToast('🎉 Congratulations! You reached this goal milestone!', 'success');
+      } else {
+        showToast(`+ ₹${amount.toLocaleString('en-IN')} added to goal!`, 'success');
+      }
+    },
+    [persisted.user.uid, showToast]
+  );
+
+  // Delete Transaction
+  const deleteGoalTransaction = useCallback(
+    async (goalId: string, txId: string) => {
+      let targetGoal: GoalItem | null = null;
+
+      setPersisted((prev) => {
+        const nextGoals = prev.goals.map((g) => {
+          if (g.id !== goalId) return g;
+          const tx = g.transactions.find((t) => t.id === txId);
+          const deducted = tx ? tx.amount : 0;
+          const newSaved = Math.max(0, g.amountSaved - deducted);
+          const updated: GoalItem = {
+            ...g,
+            amountSaved: newSaved,
+            completed: newSaved >= g.goalAmount,
+            transactions: g.transactions.filter((t) => t.id !== txId),
+          };
+          targetGoal = updated;
+          return updated;
+        });
+        return { ...prev, goals: nextGoals };
+      });
+
+      if (targetGoal && persisted.user.uid && persisted.user.uid !== GUEST_UID) {
+        try {
+          await setDoc(doc(db, 'users', persisted.user.uid, 'goals', goalId), targetGoal);
+        } catch {
+          // ignore
+        }
+      }
+      showToast('Contribution removed', 'info');
+    },
+    [persisted.user.uid, showToast]
+  );
+
+  // Metrics
   const totalGoalsTarget = useMemo(
     () => persisted.goals.reduce((acc, g) => acc + (g.goalAmount || 0), 0),
     [persisted.goals]
@@ -844,18 +819,26 @@ export const BrainVibeProvider: React.FC<{ children: React.ReactNode }> = ({
     [persisted.goals]
   );
 
+  // Standalone Data Export
   const exportGoalsData = useCallback(() => {
+    if (!persisted.user.isPro) {
+      showToast('Personal Data Backup is a Premium feature. Upgrade for ₹499/year to unlock backup access.', 'error');
+      setSubScreen(SubScreen.ProUpgrade);
+      return;
+    }
+
     try {
       const payload = {
-        app: 'BrainVibe Goals',
+        app: 'Goal App',
+        version: '2.0-apple-minimal',
         exportedAt: new Date().toISOString(),
         goals: persisted.goals,
         goalPreferences: persisted.goalPreferences,
         user: {
           name: persisted.user.name,
           email: persisted.user.email,
-          bvCoins: persisted.user.bvCoins,
           isPro: persisted.user.isPro,
+          planName: persisted.user.planName,
         },
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], {
@@ -864,19 +847,26 @@ export const BrainVibeProvider: React.FC<{ children: React.ReactNode }> = ({
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `brainvibe-goals-backup-${todayIso()}.json`;
+      a.download = `goal-app-backup-${todayIso()}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      showToast('Goals data exported to JSON file', 'success');
+      showToast('Goals and settings exported to JSON', 'success');
     } catch {
-      showToast('Failed to export goals data', 'error');
+      showToast('Could not export data', 'error');
     }
   }, [persisted.goals, persisted.goalPreferences, persisted.user, showToast]);
 
+  // Standalone Data Import
   const importGoalsData = useCallback(
-    (jsonStr: string): boolean => {
+    async (jsonStr: string): Promise<boolean> => {
+      if (!persisted.user.isPro) {
+        showToast('Data Restore is a Premium feature. Upgrade for ₹499/year to unlock restore access.', 'error');
+        setSubScreen(SubScreen.ProUpgrade);
+        return false;
+      }
+
       try {
         const parsed = JSON.parse(jsonStr);
         if (parsed && Array.isArray(parsed.goals)) {
@@ -887,344 +877,146 @@ export const BrainVibeProvider: React.FC<{ children: React.ReactNode }> = ({
               ? { ...prev.goalPreferences, ...parsed.goalPreferences }
               : prev.goalPreferences,
           }));
-          showToast('Goals and settings restored from backup!', 'success');
+
+          // Sync to Firestore if authenticated
+          if (persisted.user.uid && persisted.user.uid !== GUEST_UID) {
+            for (const g of parsed.goals) {
+              await setDoc(doc(db, 'users', persisted.user.uid, 'goals', g.id), g);
+            }
+          }
+
+          showToast('Data restored successfully!', 'success');
           return true;
         }
-        showToast('Invalid backup file structure', 'error');
+        showToast('Invalid backup file format', 'error');
         return false;
       } catch {
-        showToast('Could not parse backup JSON file', 'error');
+        showToast('Failed to parse backup JSON file', 'error');
         return false;
       }
     },
-    [showToast]
+    [persisted.user.uid, showToast]
   );
 
-  const addCreditCard = useCallback(
-    (
-      payload: Omit<CreditCardItem, 'id' | 'network' | 'gradientIndex'>
-    ): boolean => {
-      const digits = payload.cardNumber.replace(/\D/g, '');
-      if (digits.length < 15 || digits.length > 16) {
-        showToast('Card number must be 15 or 16 digits', 'error');
-        return false;
-      }
-      const network = detectCardNetwork(digits);
-      if (!network) {
-        showToast(
-          'Card must start with 4 (Visa), 5 (Mastercard), or 6 (RuPay)',
-          'error'
-        );
-        return false;
-      }
-
-      setPersisted((prev) => {
-        const card: CreditCardItem = {
-          ...payload,
-          cardNumber: digits,
-          network,
-          id: `cc-${Date.now()}`,
-          gradientIndex: prev.creditCards.length % 3,
-        };
-        return { ...prev, creditCards: [card, ...prev.creditCards] };
-      });
-      showToast('Credit card added', 'success');
-      return true;
-    },
-    [showToast]
-  );
-
-  const updateCreditCard = useCallback(
-    (id: string, patch: Partial<CreditCardItem>) => {
-      setPersisted((prev) => ({
-        ...prev,
-        creditCards: prev.creditCards.map((c) =>
-          c.id === id ? { ...c, ...patch } : c
-        ),
-      }));
-      showToast('Credit card updated', 'success');
-    },
-    [showToast]
-  );
-
-  const deleteCreditCard = useCallback(
-    (id: string) => {
-      setPersisted((prev) => ({
-        ...prev,
-        creditCards: prev.creditCards.filter((c) => c.id !== id),
-      }));
-      showToast('Credit card removed', 'info');
-    },
-    [showToast]
-  );
-
-  const payCreditCardBill = useCallback(
-    (cardId: string, bankId: string, amount: number): boolean => {
-      const card = persisted.creditCards.find((c) => c.id === cardId);
-      const bank = persisted.banks.find((b) => b.id === bankId);
-      if (!card || !bank) {
-        showToast('Select a valid bank account', 'error');
-        return false;
-      }
-      if (amount <= 0 || amount > card.outstandingAmount) {
-        showToast('Payment must be between ₹1 and total due', 'error');
-        return false;
-      }
-      if (bank.balance < amount) {
-        showToast(
-          `Insufficient balance in ${bank.bankName} for this payment`,
-          'error'
-        );
-        return false;
-      }
-
-      setPersisted((prev) => ({
-        ...prev,
-        banks: prev.banks.map((b) =>
-          b.id === bankId
-            ? { ...b, balance: b.balance - amount, updatedAt: todayIso() }
-            : b
-        ),
-        creditCards: prev.creditCards.map((c) =>
-          c.id === cardId
-            ? {
-                ...c,
-                outstandingAmount: Math.max(0, c.outstandingAmount - amount),
-              }
-            : c
-        ),
-      }));
-      showToast(
-        `Paid ₹${amount.toLocaleString('en-IN')} from ${bank.bankName}`,
-        'success'
-      );
-      return true;
-    },
-    [persisted.banks, persisted.creditCards, showToast]
-  );
-
-  const addTradeFund = useCallback(
-    (payload: Omit<TradeFundItem, 'id'>): boolean => {
-      if (payload.amount <= 0) {
-        showToast('Enter an amount greater than 0', 'error');
-        return false;
-      }
-      if (
-        payload.type === 'withdraw' &&
-        payload.amount > tradeSummary.currentBalance
-      ) {
-        showToast('Withdrawal exceeds current trading balance', 'error');
-        return false;
-      }
-      const item: TradeFundItem = { ...payload, id: `tf-${Date.now()}` };
-      setPersisted((prev) => ({
-        ...prev,
-        tradeFunds: [item, ...prev.tradeFunds],
-      }));
-      showToast(
-        payload.type === 'deposit'
-          ? 'Trading funds deposited'
-          : 'Trading funds withdrawn',
-        'success'
-      );
-      return true;
-    },
-    [showToast, tradeSummary.currentBalance]
-  );
-
-  const deleteTradeFund = useCallback(
-    (id: string) => {
-      setPersisted((prev) => ({
-        ...prev,
-        tradeFunds: prev.tradeFunds.filter((f) => f.id !== id),
-      }));
-      showToast('Fund entry deleted', 'info');
-    },
-    [showToast]
-  );
-
-  const addTradeLog = useCallback(
-    (payload: Omit<TradeLogItem, 'id'>): boolean => {
-      if (tradeSummary.netFund <= 0) {
-        showToast(
-          'Add trading capital in the Funds tab before logging trades',
-          'error'
-        );
-        return false;
-      }
-      if (payload.amount <= 0) {
-        showToast('Net Realised P&L must be greater than 0', 'error');
-        return false;
-      }
-      const item: TradeLogItem = { ...payload, id: `tl-${Date.now()}` };
-      setPersisted((prev) => ({
-        ...prev,
-        tradeLogs: [item, ...prev.tradeLogs],
-      }));
-      showToast('Trade logged in Tradebook', 'success');
-      return true;
-    },
-    [showToast, tradeSummary.netFund]
-  );
-
-  const deleteTradeLog = useCallback(
-    (id: string) => {
-      setPersisted((prev) => ({
-        ...prev,
-        tradeLogs: prev.tradeLogs.filter((t) => t.id !== id),
-      }));
-      showToast('Trade entry deleted', 'info');
-    },
-    [showToast]
-  );
-
-  const resetTradebook = useCallback(() => {
+  // Reset Demo Data
+  const resetDemoData = useCallback(() => {
     setPersisted((prev) => ({
       ...prev,
-      tradeFunds: [],
-      tradeLogs: [],
+      goals: INITIAL_SAMPLE_GOALS,
+      goalPreferences: DEFAULT_GOAL_PREFERENCES,
     }));
-    showToast('Tradebook funds & trade logs reset', 'info');
+    showToast('Reset to default sample goals', 'success');
   }, [showToast]);
 
-  const toggleBookmark = useCallback(
-    (articleId: string) => {
-      setPersisted((prev) => {
-        const exists = prev.bookmarkedIds.includes(articleId);
-        const next = exists
-          ? prev.bookmarkedIds.filter((id) => id !== articleId)
-          : [articleId, ...prev.bookmarkedIds];
-        showToast(
-          exists ? 'Removed from Bookmarks' : 'Saved to Bookmarks',
-          'info'
-        );
-        return { ...prev, bookmarkedIds: next };
-      });
-    },
-    [showToast]
-  );
+  // Help & Support: opens email client
+  const openEmailSupport = useCallback(() => {
+    const subject = encodeURIComponent('Goal App – Support Request');
+    const recipient = 'info@forestay.in';
+    window.location.href = `mailto:${recipient}?subject=${subject}`;
+  }, []);
 
-  const claimReferralReward = useCallback(
-    (friendCodeOrName?: string) => {
-      setPersisted((prev) => ({
-        ...prev,
-        user: { ...prev.user, bvCoins: prev.user.bvCoins + 50 },
-      }));
-      showToast(
-        friendCodeOrName
-          ? `Referral invite sent to ${friendCodeOrName}! +50 BV Coins credited`
-          : '+50 BrainVibe Coins added to your wallet!',
-        'success'
-      );
-    },
-    [showToast]
-  );
+  // Tutorial controls
+  const openTutorial = useCallback(() => {
+    setSubScreen(SubScreen.Tutorial);
+  }, []);
 
-  const activatePlanPreview = useCallback(
-    (plan: UserProfile['planName']) => {
-      // TODO: Integrate Razorpay checkout order creation & signature verification for live billing
-      const isPro = plan !== 'Basic';
-      setPersisted((prev) => ({
-        ...prev,
-        user: { ...prev.user, isPro, planName: plan },
-      }));
-      showToast(
-        isPro
-          ? `${plan} unlocked (Billing preview mode)`
-          : 'Switched back to Basic plan',
-        'success'
-      );
-    },
-    [showToast]
-  );
+  const completeTutorial = useCallback(() => {
+    setPersisted((prev) => ({ ...prev, hasSeenTutorial: true }));
+    setSubScreen(SubScreen.None);
+  }, []);
 
-  const value: BrainVibeContextValue = {
-    activeTab,
-    setActiveTab,
-    subScreen,
-    openSubScreen,
-    closeSubScreen,
-    isStoriesOpen,
-    setIsStoriesOpen,
-    comingSoonFeature,
-    openComingSoon,
-    closeComingSoon,
-    activeArticle,
-    setActiveArticle,
-    authStage: persisted.authStage,
-    setAuthStage,
-    pendingPhone,
-    setPendingPhone,
-    user: persisted.user,
-    updateUser,
-    lockWithQpin,
-    logoutToOnboarding,
-    loginDemoAccount,
-    resetDemoData,
-    banks: persisted.banks,
-    incomes: persisted.incomes,
-    expenses: persisted.expenses,
-    goals: persisted.goals,
-    creditCards: persisted.creditCards,
-    tradeFunds: persisted.tradeFunds,
-    tradeLogs: persisted.tradeLogs,
-    stories: INITIAL_STORIES,
-    notifications: persisted.notifications,
-    markAllNotificationsRead,
-    totalBankBalance,
-    totalOtherIncome,
-    totalIncomeCombined,
-    totalExpenses,
-    totalCreditDue,
-    totalNetworth,
-    networthSeries,
-    tradeSummary,
-    addBank,
-    updateBank,
-    deleteBank,
-    addIncome,
-    updateIncome,
-    deleteIncome,
-    addExpense,
-    updateExpense,
-    deleteExpense,
-    addGoal,
-    updateGoal,
-    deleteGoal,
-    addGoalTransaction,
-    deleteGoalTransaction,
-    isAddGoalModalOpen,
-    setIsAddGoalModalOpen,
-    openAddGoalModal,
-    totalGoalsTarget,
-    totalGoalsSaved,
-    activeGoalsCount,
-    completedGoalsCount,
-    goalPreferences: persisted.goalPreferences,
-    updateGoalPreferences,
-    exportGoalsData,
-    importGoalsData,
-    addCreditCard,
-    updateCreditCard,
-    deleteCreditCard,
-    payCreditCardBill,
-    addTradeFund,
-    deleteTradeFund,
-    addTradeLog,
-    deleteTradeLog,
-    resetTradebook,
-    newsArticles,
-    bookmarkedIds: persisted.bookmarkedIds,
-    toggleBookmark,
-    cryptoCoins,
-    isCryptoLoading,
-    refreshCrypto,
-    claimReferralReward,
-    activatePlanPreview,
-    toasts,
-    showToast,
-    dismissToast,
-  };
+  const openAddGoalModal = useCallback(() => setIsAddGoalModalOpen(true), []);
+  const closeAddGoalModal = useCallback(() => setIsAddGoalModalOpen(false), []);
+
+  const openSubScreen = useCallback((screen: SubScreen) => setSubScreen(screen), []);
+  const closeSubScreen = useCallback(() => setSubScreen(SubScreen.None), []);
+
+  const value = useMemo(
+    () => ({
+      activeTab,
+      setActiveTab: setActiveTabState,
+      subScreen,
+      openSubScreen,
+      closeSubScreen,
+      authStage: persisted.authStage,
+      setAuthStage: (stage: AuthStage) =>
+        setPersisted((prev) => ({ ...prev, authStage: stage })),
+      user: persisted.user,
+      updateUser,
+      loginWithGoogle,
+      logout,
+      isAuthLoading,
+      upgradeToPro,
+      remainingAiMessages,
+      recordAiMessageSent,
+      goals: persisted.goals,
+      goalPreferences: persisted.goalPreferences,
+      updateGoalPreferences,
+      isAddGoalModalOpen,
+      setIsAddGoalModalOpen,
+      openAddGoalModal,
+      closeAddGoalModal,
+      addGoal,
+      updateGoal,
+      deleteGoal,
+      addGoalTransaction,
+      deleteGoalTransaction,
+      totalGoalsTarget,
+      totalGoalsSaved,
+      activeGoalsCount,
+      completedGoalsCount,
+      exportGoalsData,
+      importGoalsData,
+      resetDemoData,
+      hasSeenTutorial: persisted.hasSeenTutorial,
+      openTutorial,
+      completeTutorial,
+      openEmailSupport,
+      toasts,
+      showToast,
+      dismissToast,
+    }),
+    [
+      activeTab,
+      subScreen,
+      persisted.authStage,
+      persisted.user,
+      persisted.goals,
+      persisted.goalPreferences,
+      persisted.hasSeenTutorial,
+      updateUser,
+      loginWithGoogle,
+      logout,
+      isAuthLoading,
+      upgradeToPro,
+      remainingAiMessages,
+      recordAiMessageSent,
+      updateGoalPreferences,
+      isAddGoalModalOpen,
+      openAddGoalModal,
+      closeAddGoalModal,
+      addGoal,
+      updateGoal,
+      deleteGoal,
+      addGoalTransaction,
+      deleteGoalTransaction,
+      totalGoalsTarget,
+      totalGoalsSaved,
+      activeGoalsCount,
+      completedGoalsCount,
+      exportGoalsData,
+      importGoalsData,
+      resetDemoData,
+      openTutorial,
+      completeTutorial,
+      openEmailSupport,
+      toasts,
+      showToast,
+      dismissToast,
+      openSubScreen,
+      closeSubScreen,
+    ]
+  );
 
   return (
     <BrainVibeContext.Provider value={value}>

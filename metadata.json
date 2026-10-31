@@ -1,6 +1,6 @@
 {
   "name": "BrainVibe",
-  "description": "Personal finance, net worth, goals, expense tracker, credit card manager, tradebook, and market insights platform.",
+  "description": "Apple-inspired financial goals tracker with BrainVibe AI savings recommendations, progress milestones, and cloud sync.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

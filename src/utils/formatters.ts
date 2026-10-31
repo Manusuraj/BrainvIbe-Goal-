@@ -1,4 +1,4 @@
-import { CardNetwork, GoalCycle } from '../types/models';
+import { GoalCycle } from '../types/models';
 
 export function assetUrl(relativePath: string): string {
   const cleaned = relativePath.replace(/^\/?assets\//, '');
@@ -52,14 +52,6 @@ export function formatReadableDate(isoDate: string): string {
     month: 'short',
     year: 'numeric',
   });
-}
-
-export function detectCardNetwork(cardNumber: string): CardNetwork | null {
-  const digits = cardNumber.replace(/\D/g, '');
-  if (digits.startsWith('4')) return 'VISA';
-  if (digits.startsWith('5')) return 'MASTERCARD';
-  if (digits.startsWith('6')) return 'RUPAY';
-  return null;
 }
 
 export function maskAccountNumber(acc: string): string {
