@@ -6,11 +6,8 @@ declare global {
   }
 }
 
-// Client-side Key ID (Test Mode enforced, Secret is NEVER exposed to frontend)
-const RAW_CLIENT_KEY = (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || '';
-export const RAZORPAY_KEY_ID = RAW_CLIENT_KEY.startsWith('rzp_test_')
-  ? RAW_CLIENT_KEY
-  : 'rzp_test_TuF1pkcEw6oj5U';
+// Client-side Key ID — the server's /create-order response is authoritative (Secret is NEVER exposed to frontend)
+export const RAZORPAY_KEY_ID: string = (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || '';
 
 export const SUBSCRIPTION_PRICE_INR = 499;
 export const SUBSCRIPTION_AMOUNT_PAISE = 49900;
@@ -70,12 +67,8 @@ export async function initiateSubscriptionCheckout({
   try {
     onStart?.();
 
-    // 1. Create order on backend (Test Mode)
-    let orderId: string | null = null;
-    let orderAmount = SUBSCRIPTION_AMOUNT_PAISE;
-    let keyId = RAZORPAY_KEY_ID;
-    let isRegisteredOnGateway = false;
-
+    // 1. Create order on backend — never fall back to a fake order, it can't be verified
+    let orderData: any = null;
     try {
       const orderRes = await fetch('/api/payment/create-order', {
         method: 'POST',
@@ -86,56 +79,27 @@ export async function initiateSubscriptionCheckout({
           name: user.name,
         }),
       });
-
-      if (orderRes.ok) {
-        const orderData = await orderRes.json();
-        if (orderData.orderId) {
-          orderId = orderData.orderId;
-        }
-        if (orderData.keyId) {
-          keyId = orderData.keyId;
-        }
-        if (orderData.amount) {
-          orderAmount = orderData.amount;
-        }
-        if (orderData.isRegisteredOnGateway) {
-          isRegisteredOnGateway = true;
-        }
+      orderData = await orderRes.json().catch(() => null);
+      if (!orderRes.ok || !orderData?.orderId) {
+        onError(orderData?.error || `Could not create payment order (HTTP ${orderRes.status}).`);
+        return;
       }
     } catch (orderFetchErr) {
-      console.warn('[Payment Service] Backend order creation network note:', orderFetchErr);
+      console.error('[Payment Service] Backend order creation failed:', orderFetchErr);
+      onError('Payment server is unreachable. Please try again.');
+      return;
     }
 
-    // Fallback order ID if backend was momentarily unreachable
-    if (!orderId) {
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-      let suffix = '';
-      for (let i = 0; i < 14; i++) {
-        suffix += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
-      orderId = `order_${suffix}`;
-    }
+    const orderId: string = orderData.orderId;
+    const orderAmount: number = orderData.amount || SUBSCRIPTION_AMOUNT_PAISE;
+    const keyId: string = orderData.keyId || RAZORPAY_KEY_ID;
+    const isTestMode = keyId.startsWith('rzp_test_');
 
     // 2. Ensure Razorpay SDK is available
     const isSDKReady = await loadRazorpaySDK();
 
     if (!isSDKReady || typeof window === 'undefined' || !window.Razorpay) {
-      console.warn('[Payment Service] Razorpay SDK unavailable, simulating test verification in preview');
-      const directPaymentId = `pay_test_${Date.now()}`;
-      try {
-        await fetch('/api/payment/verify-payment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            razorpay_payment_id: directPaymentId,
-            razorpay_order_id: orderId,
-            uid: user.uid,
-          }),
-        });
-      } catch {
-        // ignore
-      }
-      await onSuccess(directPaymentId);
+      onError('Could not load Razorpay checkout. Check your connection or disable ad-blockers and try again.');
       return;
     }
 
@@ -145,26 +109,34 @@ export async function initiateSubscriptionCheckout({
       amount: orderAmount,
       currency: 'INR',
       name: 'BrainVibe Goal App',
-      description: 'Premium Annual (₹499/year) — Test Mode',
+      description: `Premium Annual (₹499/year)${isTestMode ? ' — Test Mode' : ''}`,
       image: '/assets/bv.png',
-      // Only supply order_id if validated with the gateway to prevent merchant failure popups
-      order_id: isRegisteredOnGateway ? orderId : undefined,
+      order_id: orderId,
       handler: async (response: any) => {
-        const paymentId = response?.razorpay_payment_id || `pay_test_${Date.now()}`;
+        const paymentId = response?.razorpay_payment_id;
         try {
-          // Verify with backend
-          await fetch('/api/payment/verify-payment', {
+          // Verify signature with backend before granting Pro
+          const verifyRes = await fetch('/api/payment/verify-payment', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               razorpay_payment_id: paymentId,
-              razorpay_order_id: response?.razorpay_order_id || orderId,
-              razorpay_signature: response?.razorpay_signature || '',
+              razorpay_order_id: response?.razorpay_order_id,
+              razorpay_signature: response?.razorpay_signature,
               uid: user.uid,
             }),
           });
+          const verifyData = await verifyRes.json().catch(() => null);
+          if (!verifyRes.ok || !verifyData?.verified) {
+            onError(
+              `Payment received (Ref: ${paymentId}) but verification failed: ${verifyData?.error || 'unknown error'}. Please contact support.`
+            );
+            return;
+          }
         } catch (vErr) {
-          console.warn('[Payment Service] Verification endpoint notice:', vErr);
+          console.error('[Payment Service] Verification request failed:', vErr);
+          onError(`Payment received (Ref: ${paymentId}) but could not be verified. Please contact support.`);
+          return;
         }
 
         // Activate Pro in context and persistent storage
@@ -176,7 +148,6 @@ export async function initiateSubscriptionCheckout({
         contact: user?.phoneNumber || '',
       },
       notes: {
-        mode: 'test',
         plan: 'Premium Annual',
         price: '499',
         currency: 'INR',
@@ -202,9 +173,8 @@ export async function initiateSubscriptionCheckout({
       const errCode = response?.error?.code || '';
       const errDesc = response?.error?.description || response?.error?.reason || 'Transaction could not be completed.';
       
-      // If merchant setup issue occurs in preview environment test mode
       if (errDesc.toLowerCase().includes('merchant') || errCode === 'BAD_REQUEST_ERROR') {
-        onError(`Razorpay Test Mode Notice: ${errDesc}. Ensure test keys are generated in your Razorpay Dashboard.`);
+        onError(`Razorpay setup issue: ${errDesc}. Check the API keys in your Razorpay Dashboard.`);
       } else {
         onError(`Payment failed: ${errDesc}`);
       }

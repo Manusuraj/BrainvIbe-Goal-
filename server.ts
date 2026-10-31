@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+import express, { type Request, type Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
@@ -37,41 +37,33 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 // Middleware
 app.use(express.json());
 
-// Razorpay Test Mode Credentials
-// Strict rule: Test mode (rzp_test_...) is enforced in preview testing
-const rawKey = process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || '';
-let resolvedKeyId = rawKey.startsWith('rzp_test_')
-  ? rawKey
-  : rawKey.startsWith('rzp_live_')
-  ? rawKey.replace('rzp_live_', 'rzp_test_')
-  : 'rzp_test_TuF1pkcEw6oj5U';
-
-if (!resolvedKeyId.startsWith('rzp_test_')) {
-  resolvedKeyId = 'rzp_test_TuF1pkcEw6oj5U';
-}
-
-export const RAZORPAY_KEY_ID = resolvedKeyId;
-
-// Server-side Secret: Exclusively available on backend; NEVER exposed to VITE / client
-const rawSecret =
-  process.env.RAZORPAY_KEY_SECRET ||
-  (process.env.VITE_RAZORPAY_KEY_ID && !process.env.VITE_RAZORPAY_KEY_ID.startsWith('rzp_')
-    ? process.env.VITE_RAZORPAY_KEY_ID
-    : '');
-export const RAZORPAY_KEY_SECRET = rawSecret || '78HBAba2TQUH0Nime1R0Abna';
+// Razorpay credentials — both values must come from the SAME Razorpay account and mode
+// (Dashboard → Account & Settings → API Keys). Test keys start with rzp_test_, live keys with rzp_live_.
+export const RAZORPAY_KEY_ID = (process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || '').trim();
+// Server-side Secret: exclusively available on backend; NEVER exposed to VITE / client
+export const RAZORPAY_KEY_SECRET = (process.env.RAZORPAY_KEY_SECRET || '').trim();
+const PAYMENT_MODE = RAZORPAY_KEY_ID.startsWith('rzp_live_') ? 'live' : 'test';
+const isRazorpayConfigured = Boolean(RAZORPAY_KEY_ID.startsWith('rzp_') && RAZORPAY_KEY_SECRET);
 
 export const PLAN_AMOUNT_PAISE = 49900; // ₹499.00
 export const PLAN_NAME = 'Premium Annual';
 
-console.log(`[Razorpay Server Config] Mode: TEST, Key ID: ${RAZORPAY_KEY_ID}, Secret Present: ${Boolean(RAZORPAY_KEY_SECRET)}`);
+if (isRazorpayConfigured) {
+  console.log(`[Razorpay Server Config] Mode: ${PAYMENT_MODE}, Key ID: ${RAZORPAY_KEY_ID}`);
+} else {
+  console.warn(
+    '[Razorpay Server Config] RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET missing — payments are disabled. Add them to .env.'
+  );
+}
 
 // Health check endpoint
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
     service: 'BrainVibe Goal App Server',
-    paymentMode: 'test',
-    keyId: RAZORPAY_KEY_ID,
+    paymentMode: PAYMENT_MODE,
+    paymentConfigured: isRazorpayConfigured,
+    keyId: RAZORPAY_KEY_ID || null,
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
   });
@@ -80,8 +72,9 @@ app.get('/api/health', (_req: Request, res: Response) => {
 // Config endpoint for client (Public only - never expose secret)
 app.get('/api/payment/config', (_req: Request, res: Response) => {
   res.json({
-    keyId: RAZORPAY_KEY_ID,
-    mode: 'test',
+    keyId: RAZORPAY_KEY_ID || null,
+    configured: isRazorpayConfigured,
+    mode: PAYMENT_MODE,
     amount: PLAN_AMOUNT_PAISE,
     currency: 'INR',
     planName: PLAN_NAME,
@@ -89,131 +82,114 @@ app.get('/api/payment/config', (_req: Request, res: Response) => {
   });
 });
 
-// Create Order endpoint (Authenticated with Razorpay Test Mode API)
+// Create Order endpoint
 app.post('/api/payment/create-order', async (req: Request, res: Response) => {
+  if (!isRazorpayConfigured) {
+    return res.status(503).json({
+      success: false,
+      error: 'Payments are not configured on the server (RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET missing).',
+    });
+  }
+
   try {
     const { uid, email, name } = req.body || {};
     const receiptId = `rcpt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const authHeader = 'Basic ' + Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64');
 
-    // 1. Attempt official Razorpay Test Order creation
-    if (RAZORPAY_KEY_SECRET && RAZORPAY_KEY_ID.startsWith('rzp_test_')) {
-      try {
-        const authHeader =
-          'Basic ' + Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64');
+    const rzpResponse = await fetch('https://api.razorpay.com/v1/orders', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: authHeader,
+      },
+      body: JSON.stringify({
+        amount: PLAN_AMOUNT_PAISE,
+        currency: 'INR',
+        receipt: receiptId,
+        notes: {
+          plan: PLAN_NAME,
+          uid: uid || 'anonymous',
+          email: email || '',
+          name: name || '',
+        },
+      }),
+    });
 
-        const rzpResponse = await fetch('https://api.razorpay.com/v1/orders', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: authHeader,
-          },
-          body: JSON.stringify({
-            amount: PLAN_AMOUNT_PAISE,
-            currency: 'INR',
-            receipt: receiptId,
-            notes: {
-              environment: 'ai-studio-preview',
-              mode: 'test',
-              plan: PLAN_NAME,
-              uid: uid || 'anonymous',
-              email: email || '',
-              name: name || '',
-            },
-          }),
-        });
-
-        if (rzpResponse.ok) {
-          const rzpOrder = await rzpResponse.json();
-          console.log('[Razorpay Test API] Gateway order created successfully:', rzpOrder.id);
-          return res.json({
-            success: true,
-            orderId: rzpOrder.id,
-            amount: rzpOrder.amount || PLAN_AMOUNT_PAISE,
-            currency: rzpOrder.currency || 'INR',
-            keyId: RAZORPAY_KEY_ID,
-            planName: PLAN_NAME,
-            receipt: receiptId,
-            mode: 'test',
-            isRegisteredOnGateway: true,
-          });
-        }
-
-        const errText = await rzpResponse.text();
-        console.warn('[Razorpay Test API] Gateway responded with non-200:', rzpResponse.status, errText);
-      } catch (apiErr) {
-        console.warn('[Razorpay Test API] Network error calling gateway:', apiErr);
-      }
+    if (!rzpResponse.ok) {
+      const errBody: any = await rzpResponse.json().catch(() => ({}));
+      const description = errBody?.error?.description || `Razorpay responded with HTTP ${rzpResponse.status}`;
+      console.error('[Razorpay] Order creation failed:', rzpResponse.status, description);
+      return res.status(502).json({
+        success: false,
+        error:
+          rzpResponse.status === 401
+            ? 'Razorpay authentication failed — check that RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are a matching pair.'
+            : `Razorpay error: ${description}`,
+      });
     }
 
-    // 2. Fallback test order generator (compliant with standard order_ + 14 chars pattern)
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let suffix = '';
-    for (let i = 0; i < 14; i++) {
-      suffix += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    const testOrderId = `order_${suffix}`;
-
-    console.log('[Payment Test Order] Generated preview test order:', testOrderId);
+    const rzpOrder = await rzpResponse.json();
+    console.log('[Razorpay] Order created:', rzpOrder.id);
     return res.json({
       success: true,
-      orderId: testOrderId,
-      amount: PLAN_AMOUNT_PAISE,
-      currency: 'INR',
+      orderId: rzpOrder.id,
+      amount: rzpOrder.amount,
+      currency: rzpOrder.currency,
       keyId: RAZORPAY_KEY_ID,
       planName: PLAN_NAME,
       receipt: receiptId,
-      mode: 'test',
-      isRegisteredOnGateway: false,
+      mode: PAYMENT_MODE,
     });
   } catch (err: any) {
-    console.error('Error creating order:', err);
-    return res.status(500).json({
+    console.error('[Razorpay] Error creating order:', err);
+    return res.status(502).json({
       success: false,
-      error: 'Failed to create payment order. Please try again.',
-      message: err.message,
+      error: 'Could not reach Razorpay to create the order. Please try again.',
     });
   }
 });
 
-// Verify Payment endpoint
+// Verify Payment endpoint — Pro must only be granted when the signature checks out
 app.post('/api/payment/verify-payment', (req: Request, res: Response) => {
   try {
     const { razorpay_payment_id, razorpay_order_id, razorpay_signature, uid } = req.body || {};
 
-    if (!razorpay_payment_id) {
+    if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
       return res.status(400).json({
         success: false,
         verified: false,
-        error: 'Missing razorpay_payment_id',
+        error: 'Missing razorpay_payment_id, razorpay_order_id or razorpay_signature',
       });
     }
+    if (!RAZORPAY_KEY_SECRET) {
+      return res.status(503).json({ success: false, verified: false, error: 'Payments are not configured on the server.' });
+    }
 
-    // Cryptographic signature verification if signature is present
-    let signatureVerified = true;
-    if (razorpay_signature && razorpay_order_id && RAZORPAY_KEY_SECRET) {
-      try {
-        const expectedSignature = crypto
-          .createHmac('sha256', RAZORPAY_KEY_SECRET)
-          .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-          .digest('hex');
-        signatureVerified = expectedSignature === razorpay_signature;
-      } catch (sigErr) {
-        console.warn('[Payment Verification] Signature calculation note:', sigErr);
-      }
+    const expectedSignature = crypto
+      .createHmac('sha256', RAZORPAY_KEY_SECRET)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest('hex');
+    const expected = Buffer.from(expectedSignature);
+    const received = Buffer.from(String(razorpay_signature));
+    const signatureVerified = expected.length === received.length && crypto.timingSafeEqual(expected, received);
+
+    if (!signatureVerified) {
+      console.warn(`[Payment Verification] Signature mismatch for payment ${razorpay_payment_id}`);
+      return res.status(400).json({ success: false, verified: false, error: 'Payment signature verification failed.' });
     }
 
     const now = new Date();
     const activatedAt = now.toISOString();
     const expiresAt = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
 
-    console.log(`[Payment Verified] ID: ${razorpay_payment_id}, UID: ${uid || 'guest'}, Status: Active Premium`);
+    console.log(`[Payment Verified] ID: ${razorpay_payment_id}, UID: ${uid || 'guest'}`);
 
     return res.json({
       success: true,
-      verified: signatureVerified,
+      verified: true,
       paymentId: razorpay_payment_id,
-      orderId: razorpay_order_id || null,
-      mode: 'test',
+      orderId: razorpay_order_id,
+      mode: PAYMENT_MODE,
       planName: PLAN_NAME,
       amount: 499,
       amountPaise: PLAN_AMOUNT_PAISE,
@@ -221,12 +197,6 @@ app.post('/api/payment/verify-payment', (req: Request, res: Response) => {
       activatedAt,
       expiresAt,
       uid: uid || null,
-      benefits: [
-        'Completely ad-free experience',
-        '100 AI chat messages per month',
-        'Personal data backup and restore',
-        'Priority milestone intelligence',
-      ],
     });
   } catch (err: any) {
     console.error('Error verifying payment:', err);
@@ -257,7 +227,7 @@ async function startServer() {
   } else {
     const distPath = path.resolve(__dirname, 'dist');
     app.use(express.static(distPath));
-    app.get('*', (_req: Request, res: Response) => {
+    app.get('/{*splat}', (_req: Request, res: Response) => {
       res.sendFile(path.resolve(distPath, 'index.html'));
     });
   }
