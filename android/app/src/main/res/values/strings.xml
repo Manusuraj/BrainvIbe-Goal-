@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">BrainVibe</string>
+    <string name="title_activity_main">BrainVibe</string>
+    <string name="package_name">com.brainvibe.goal</string>
+    <string name="custom_url_scheme">com.brainvibe.goal</string>
+</resources>

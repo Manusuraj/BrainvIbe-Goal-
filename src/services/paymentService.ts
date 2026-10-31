@@ -9,6 +9,10 @@ declare global {
 // Client-side Key ID — the server's /create-order response is authoritative (Secret is NEVER exposed to frontend)
 export const RAZORPAY_KEY_ID: string = (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || '';
 
+// Web build is served by server.ts, so relative /api paths work. The Android app loads from a
+// local bundle and must call the deployed server instead (e.g. https://your-server.example.com).
+const API_BASE_URL: string = ((import.meta as any).env?.VITE_API_BASE_URL || '').replace(/\/$/, '');
+
 export const SUBSCRIPTION_PRICE_INR = 499;
 export const SUBSCRIPTION_AMOUNT_PAISE = 49900;
 
@@ -70,7 +74,7 @@ export async function initiateSubscriptionCheckout({
     // 1. Create order on backend — never fall back to a fake order, it can't be verified
     let orderData: any = null;
     try {
-      const orderRes = await fetch('/api/payment/create-order', {
+      const orderRes = await fetch(`${API_BASE_URL}/api/payment/create-order`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -116,7 +120,7 @@ export async function initiateSubscriptionCheckout({
         const paymentId = response?.razorpay_payment_id;
         try {
           // Verify signature with backend before granting Pro
-          const verifyRes = await fetch('/api/payment/verify-payment', {
+          const verifyRes = await fetch(`${API_BASE_URL}/api/payment/verify-payment`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

@@ -1,13 +1,17 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
+import { Capacitor } from '@capacitor/core';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import {
   getAuth,
   GoogleAuthProvider,
+  signInWithCredential,
   signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
-  signOut,
+  signOut as firebaseSignOut,
   onAuthStateChanged,
   User as FirebaseUser,
+  UserCredential,
 } from 'firebase/auth';
 import {
   getFirestore,
@@ -50,6 +54,13 @@ const firestoreDatabaseId: string = useEnvConfig
   ? env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || ''
   : firebaseConfigRaw.firestoreDatabaseId;
 
+if (!firebaseConfig.apiKey || !firebaseConfig.appId) {
+  console.error(
+    `[Firebase] apiKey/appId missing for project "${firebaseConfig.projectId}". ` +
+      'Copy the Web app config from Firebase Console → Project settings into firebase-applet-config.json (or .env).'
+  );
+}
+
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 export const auth = getAuth(app);
@@ -61,6 +72,30 @@ export const db =
   firestoreDatabaseId && firestoreDatabaseId !== '(default)'
     ? getFirestore(app, firestoreDatabaseId)
     : getFirestore(app);
+
+export const isNativeApp = Capacitor.isNativePlatform();
+
+// Google Sign-In: popup on web; on Android the native Google account picker supplies an ID token
+// that the Firebase JS SDK exchanges for a session (plugin runs with skipNativeAuth: true).
+export async function signInWithGoogle(): Promise<UserCredential> {
+  if (!isNativeApp) {
+    return signInWithPopup(auth, googleProvider);
+  }
+  const result = await FirebaseAuthentication.signInWithGoogle();
+  const idToken = result.credential?.idToken;
+  if (!idToken) {
+    throw new Error('Google Sign-In did not return an ID token.');
+  }
+  return signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
+}
+
+export async function signOut(): Promise<void> {
+  if (isNativeApp) {
+    // Clears the native Google session so the account picker shows again next time
+    await FirebaseAuthentication.signOut().catch(() => undefined);
+  }
+  await firebaseSignOut(auth);
+}
 
 // Test Firestore connection on boot as specified in the Firebase skill
 export async function validateFirestoreConnection(): Promise<boolean> {
@@ -79,7 +114,6 @@ export {
   signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
-  signOut,
   onAuthStateChanged,
   doc,
   collection,

@@ -25,9 +25,8 @@ import {
   getDoc,
   deleteDoc,
   onSnapshot,
-  signInWithPopup,
+  signInWithGoogle,
   signOut,
-  googleProvider,
   onAuthStateChanged,
   validateFirestoreConnection,
 } from '../services/firebase';
@@ -492,7 +491,7 @@ export const BrainVibeProvider: React.FC<{ children: React.ReactNode }> = ({
   const loginWithGoogle = useCallback(async () => {
     setIsAuthLoading(true);
     try {
-      const result = await signInWithPopup(auth, googleProvider);
+      const result = await signInWithGoogle();
       const user = result.user;
       showToast(`Welcome, ${user.displayName || 'friend'}!`, 'success');
       setPersisted((prev) => ({
@@ -510,7 +509,7 @@ export const BrainVibeProvider: React.FC<{ children: React.ReactNode }> = ({
   // Logout
   const logout = useCallback(async () => {
     try {
-      await signOut(auth);
+      await signOut();
     } catch {
       // ignore
     }

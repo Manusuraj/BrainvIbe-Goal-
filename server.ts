@@ -37,6 +37,23 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 // Middleware
 app.use(express.json());
 
+// Allow the Capacitor Android app (served from https://localhost inside the WebView) to call the API
+const ALLOWED_APP_ORIGINS = new Set(['https://localhost', 'capacitor://localhost', 'http://localhost']);
+app.use('/api', (req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_APP_ORIGINS.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  }
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
+
 // Razorpay credentials — both values must come from the SAME Razorpay account and mode
 // (Dashboard → Account & Settings → API Keys). Test keys start with rzp_test_, live keys with rzp_live_.
 export const RAZORPAY_KEY_ID = (process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || '').trim();
