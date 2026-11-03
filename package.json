@@ -8,7 +8,8 @@
     "start": "node server.ts",
     "build": "tsc && vite build",
     "lint": "tsc --noEmit",
-    "preview": "vite preview --host 0.0.0.0 --port 3000"
+    "preview": "vite preview --host 0.0.0.0 --port 3000",
+    "android:sync": "cap sync android"
   },
   "dependencies": {
     "@google/genai": "^2.32.0",
@@ -20,7 +21,8 @@
     "react-dom": "^19.0.0",
     "recharts": "^2.15.3",
     "tailwind-merge": "^3.3.0",
-    "tsx": "^4.23.15"
+    "tsx": "^4.23.15",
+    "@capacitor/core": "^7.4.3"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.8",
@@ -30,6 +32,7 @@
     "@vitejs/plugin-react": "^4.5.0",
     "tailwindcss": "^4.1.8",
     "typescript": "~5.8.3",
-    "vite": "^6.3.5"
+    "vite": "^6.3.5",
+    "@capacitor/cli": "^7.4.3"
   }
 }
