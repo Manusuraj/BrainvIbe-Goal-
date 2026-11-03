@@ -1,36 +1,66 @@
-name: BrainVibe PWA validation
+name: BrainVibe Android builds
 
 on:
   workflow_dispatch:
   push:
     paths:
+      - 'src/**'
       - 'index.html'
       - 'package.json'
       - 'package-lock.json'
-      - 'public/manifest.json'
-      - 'public/sw.js'
+      - 'capacitor.config.ts'
+      - 'public/**'
       - '.github/workflows/android-build.yml'
 
 permissions:
   contents: read
 
 jobs:
-  validate-pwa:
-    name: Build web app and validate PWA assets
+  android:
+    name: Build BrainVibe APK and AAB
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: npm
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+
       - name: Build web application
         run: npm run build
-      - name: Verify PWA files are included
+
+      - name: Generate Android project
         run: |
-          test -f dist/manifest.json
-          test -f dist/sw.js
-          echo "PWA manifest and service worker are included in the production build."
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+
+      - name: Build installable debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      - name: Build release AAB
+        working-directory: android
+        run: ./gradlew bundleRelease
+
+      - name: Upload Android builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: brainvibe-android-builds
+          if-no-files-found: error
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/bundle/release/app-release.aab
