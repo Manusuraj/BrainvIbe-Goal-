@@ -17,15 +17,14 @@
         "lastPaymentId": { "type": "string" },
         "dailyAiCount": { "type": "number" },
         "dailyAiDate": { "type": "string" },
-        "monthlyAiCount": { "type": "number" },
-        "monthlyAiMonth": { "type": "string" },
+        "timezone": { "type": "string" },
         "createdAt": { "type": "string" }
       },
       "required": ["uid", "name", "email"]
     },
     "Goal": {
       "title": "Goal",
-      "description": "Financial savings goal document.",
+      "description": "Financial savings goal document with deadline and status.",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
@@ -39,6 +38,7 @@
         "completed": { "type": "boolean" },
         "completedDate": { "type": "string" },
         "category": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "completed", "overdue"] },
         "transactions": {
           "type": "array",
           "items": {
@@ -54,37 +54,32 @@
       },
       "required": ["id", "title", "goalAmount", "amountSaved", "targetDate", "completed"]
     },
-    "Payment": {
-      "title": "Payment",
-      "description": "Payment receipt for subscription upgrade via Razorpay.",
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Chat message history for BrainVibe AI financial coach.",
       "type": "object",
       "properties": {
-        "paymentId": { "type": "string" },
-        "amount": { "type": "number" },
-        "amountPaise": { "type": "number" },
-        "currency": { "type": "string" },
-        "planName": { "type": "string" },
-        "status": { "type": "string" },
-        "activatedAt": { "type": "string" },
-        "expiresAt": { "type": "string" },
-        "userId": { "type": "string" },
+        "id": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "assistant"] },
+        "content": { "type": "string" },
+        "timestamp": { "type": "string" },
         "createdAt": { "type": "string" }
       },
-      "required": ["paymentId", "amount", "status", "userId"]
+      "required": ["id", "role", "content", "timestamp"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "UserProfile",
-      "description": "User profile information."
+      "description": "User profile information and daily AI usage."
     },
     "/users/{userId}/goals/{goalId}": {
       "schema": "Goal",
       "description": "Savings goals created by this user."
     },
-    "/users/{userId}/payments/{paymentId}": {
-      "schema": "Payment",
-      "description": "Payment transaction history for this user."
+    "/users/{userId}/chats/{chatId}": {
+      "schema": "ChatMessage",
+      "description": "AI conversation history for this user."
     }
   }
 }

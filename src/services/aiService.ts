@@ -214,7 +214,6 @@ You help users save money, evaluate their savings pacing, make realistic budget 
 
 User Context:
 Name: ${user.name || 'Friend'}
-Pro Member: ${user.isPro ? 'Yes (Pro)' : 'No (Free)'}
 Total Saved so far: ₹${totalSaved.toLocaleString('en-IN')}
 Total Target Portfolio: ₹${totalTarget.toLocaleString('en-IN')}
 Active Goals (${activeGoals.length}):

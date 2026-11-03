@@ -1,18 +1,17 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bot,
-  Crown,
-  HelpCircle,
-  Lock,
+  Clock,
+  RotateCcw,
   Send,
   Sparkles,
-  TrendingUp,
+  Trash2,
   User,
-  Zap,
 } from 'lucide-react';
 import { useBrainVibe } from '../context/BrainVibeContext';
-import { ChatMessage, SubScreen } from '../types/models';
+import { ChatMessage } from '../types/models';
 import { askAiSavingsAssistant } from '../services/aiService';
+import { formatHmsCountdown } from '../utils/formatters';
 
 const SUGGESTED_QUESTIONS = [
   'How much should I save every week?',
@@ -27,36 +26,48 @@ export const AiAssistantView: React.FC = () => {
     user,
     goals,
     remainingAiMessages,
+    secondsUntilMidnight,
     recordAiMessageSent,
-    openSubScreen,
+    refundAiMessage,
+    chatHistory,
+    addChatMessage,
+    clearChatHistory,
   } = useBrainVibe();
-
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'welcome-msg',
-      role: 'assistant',
-      content: `Hello ${user.name ? user.name.split(' ')[0] : 'there'}! I'm **BrainVibe AI**, your personal savings coach.\n\nI can calculate your exact weekly savings pace, evaluate whether your goal targets are realistic, and suggest smart adjustments to help you finish months ahead of schedule.\n\nWhat would you like to explore today?`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    },
-  ]);
 
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Live formatted countdown to next midnight
+  const formattedCountdown = useMemo(() => {
+    return formatHmsCountdown(secondsUntilMidnight);
+  }, [secondsUntilMidnight]);
+
+  const isLimitReached = remainingAiMessages <= 0;
+
+  // Active messages list combining persistent history or default welcome
+  const displayMessages = useMemo(() => {
+    if (chatHistory.length > 0) {
+      return chatHistory;
+    }
+    const welcomeMsg: ChatMessage = {
+      id: 'welcome-msg',
+      role: 'assistant',
+      content: `Hello ${user.name ? user.name.split(' ')[0] : 'there'}! I'm **BrainVibe AI**, your dedicated savings coach.\n\nI calculate exact weekly savings paces, evaluate deadline realism, and help you reach your goals faster.\n\nYou have **5 daily chat credits** available. What goal would you like to explore today?`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    return [welcomeMsg];
+  }, [chatHistory, user.name]);
+
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isTyping]);
+  }, [displayMessages, isTyping]);
 
   const handleSend = async (queryText?: string) => {
     const text = (queryText || input).trim();
-    if (!text || isTyping) return;
+    if (!text || isTyping || isLimitReached) return;
 
-    if (!user.isPro && remainingAiMessages <= 0) {
-      openSubScreen(SubScreen.ProUpgrade);
-      return;
-    }
-
+    // Backend-enforced credit deduction
     const canProceed = await recordAiMessageSent();
     if (!canProceed) return;
 
@@ -65,9 +76,10 @@ export const AiAssistantView: React.FC = () => {
       role: 'user',
       content: text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      createdAt: new Date().toISOString(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    await addChatMessage(userMessage);
     setInput('');
     setIsTyping(true);
 
@@ -76,7 +88,7 @@ export const AiAssistantView: React.FC = () => {
         text,
         user,
         goals,
-        messages.map((m) => ({ role: m.role, content: m.content }))
+        displayMessages.map((m) => ({ role: m.role, content: m.content }))
       );
 
       const botMessage: ChatMessage = {
@@ -84,79 +96,86 @@ export const AiAssistantView: React.FC = () => {
         role: 'assistant',
         content: responseText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        createdAt: new Date().toISOString(),
       };
 
-      setMessages((prev) => [...prev, botMessage]);
+      await addChatMessage(botMessage);
     } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `bot-${Date.now()}`,
-          role: 'assistant',
-          content: 'Sorry, I encountered a temporary network delay. Please try again or tap one of the suggested prompts below.',
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ]);
+      // Failed requests should not consume a credit
+      await refundAiMessage();
+
+      const errorMessage: ChatMessage = {
+        id: `bot-${Date.now()}`,
+        role: 'assistant',
+        content: 'I encountered a temporary connection issue. Your chat credit has been preserved. Please try again in a moment.',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        createdAt: new Date().toISOString(),
+      };
+      await addChatMessage(errorMessage);
     } finally {
       setIsTyping(false);
     }
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-130px)] max-w-3xl mx-auto">
-      {/* Clean Sleek Header Bar */}
+    <div className="flex flex-col h-[calc(100vh-140px)] max-w-3xl mx-auto">
+      {/* Clean Header Bar */}
       <div className="flex items-center justify-between pb-3.5 border-b border-white/8 mb-3 px-1 gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-400 to-yellow-500 text-zinc-950 flex items-center justify-center font-black shadow-md shadow-amber-500/10 shrink-0">
-            <Sparkles className="w-5 h-5 text-zinc-950" />
+          <div className="w-10 h-10 rounded-2xl bg-[#ffcf07] text-zinc-950 flex items-center justify-center font-black shadow-md shadow-[#ffcf07]/20 shrink-0">
+            <Sparkles className="w-5 h-5 text-zinc-950 stroke-[2.5]" />
           </div>
-          <div className="flex items-center gap-2 min-w-0">
-            <h1 className="text-lg sm:text-xl font-bold tracking-tight text-white truncate">
-              BrainVibe AI
-            </h1>
-            {user.isPro ? (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-400 text-zinc-950 flex items-center gap-1 shrink-0">
-                <Crown className="w-3 h-3" /> PRO
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="text-base sm:text-lg font-bold tracking-tight text-white truncate">
+                BrainVibe AI
+              </h1>
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/10 text-zinc-300">
+                Savings Coach
               </span>
-            ) : (
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/10 text-zinc-300 shrink-0">
-                Free
-              </span>
-            )}
+            </div>
+            <p className="text-[11px] text-zinc-400">Pacing & habit intelligence</p>
           </div>
         </div>
 
-        {/* Message limit counter / Pro upgrade pill */}
-        <div className="shrink-0">
-          {user.isPro ? (
-            <div className="text-xs text-[#ffcf07] font-semibold px-3 py-1.5 rounded-full bg-[#ffcf07]/10 border border-[#ffcf07]/25 flex items-center gap-1.5 shadow-sm">
-              <Zap className="w-3.5 h-3.5 fill-[#ffcf07] text-[#ffcf07]" />
-              <span>
-                <strong className="text-white font-bold">{remainingAiMessages}</strong> / 100 monthly left
-              </span>
-            </div>
-          ) : (
+        {/* Daily Chat Usage Indicator */}
+        <div className="flex items-center gap-2 shrink-0">
+          <div
+            className={`text-xs font-semibold px-3 py-1.5 rounded-full border flex items-center gap-2 shadow-sm transition-colors ${
+              isLimitReached
+                ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                : 'bg-zinc-900 border-white/10 text-zinc-200'
+            }`}
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                remainingAiMessages > 2
+                  ? 'bg-emerald-400'
+                  : remainingAiMessages > 0
+                  ? 'bg-amber-400'
+                  : 'bg-rose-400'
+              }`}
+            />
+            <span className="tabular-nums">
+              Daily chats: <strong className="text-white">{remainingAiMessages}/5</strong> remaining
+            </span>
+          </div>
+
+          {chatHistory.length > 0 && (
             <button
-              onClick={() => openSubScreen(SubScreen.ProUpgrade)}
-              className="group text-xs px-3 py-1.5 rounded-full bg-zinc-900 border border-white/10 hover:border-[#ffcf07]/40 transition cursor-pointer flex items-center gap-2 shadow-sm"
+              onClick={clearChatHistory}
+              className="p-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-white/8 transition cursor-pointer"
+              title="Clear chat history"
             >
-              <span className="flex items-center gap-1.5">
-                <span className={`w-2 h-2 rounded-full ${remainingAiMessages > 1 ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                <span className="text-zinc-200 text-xs font-medium">
-                  <strong className="text-white font-bold">{remainingAiMessages}</strong>/5 left today
-                </span>
-              </span>
-              <span className="px-2 py-0.5 rounded-full bg-[#ffcf07] text-zinc-950 font-bold text-[10px] group-hover:bg-yellow-400 transition">
-                Upgrade ₹499
-              </span>
+              <RotateCcw className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
       </div>
 
       {/* Messages Scroll Area */}
-      <div className="flex-1 overflow-y-auto pr-1 space-y-4 pb-4">
-        {messages.map((msg) => {
+      <div className="flex-1 overflow-y-auto pr-1 space-y-4 pb-3">
+        {displayMessages.map((msg) => {
           const isUser = msg.role === 'user';
           return (
             <div
@@ -167,7 +186,7 @@ export const AiAssistantView: React.FC = () => {
                 className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-xs font-semibold ${
                   isUser
                     ? 'bg-zinc-800 text-zinc-200 border border-white/10'
-                    : 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-400'
+                    : 'bg-[#ffcf07]/15 border border-[#ffcf07]/30 text-[#ffcf07]'
                 }`}
               >
                 {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
@@ -176,7 +195,7 @@ export const AiAssistantView: React.FC = () => {
               <div
                 className={`max-w-[85%] sm:max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                   isUser
-                    ? 'bg-emerald-500 text-zinc-950 font-medium rounded-tr-sm shadow-sm'
+                    ? 'bg-[#ffcf07] text-zinc-950 font-medium rounded-tr-sm shadow-sm'
                     : 'bg-zinc-900/90 border border-white/8 text-zinc-200 rounded-tl-sm backdrop-blur'
                 }`}
               >
@@ -199,14 +218,14 @@ export const AiAssistantView: React.FC = () => {
 
         {isTyping && (
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 rounded-full bg-[#ffcf07]/15 border border-[#ffcf07]/30 text-[#ffcf07] flex items-center justify-center shrink-0">
               <Bot className="w-4 h-4 animate-pulse" />
             </div>
             <div className="bg-zinc-900 border border-white/8 rounded-2xl px-4 py-2.5 text-xs text-zinc-400 flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-bounce" />
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-bounce [animation-delay:0.2s]" />
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-bounce [animation-delay:0.4s]" />
-              <span className="ml-1">Analyzing your goal pacing...</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-[#ffcf07] animate-bounce" />
+              <span className="w-1.5 h-1.5 rounded-full bg-[#ffcf07] animate-bounce [animation-delay:0.2s]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-[#ffcf07] animate-bounce [animation-delay:0.4s]" />
+              <span className="ml-1 text-zinc-300">Analyzing goal pacing...</span>
             </div>
           </div>
         )}
@@ -214,29 +233,48 @@ export const AiAssistantView: React.FC = () => {
         <div ref={scrollRef} />
       </div>
 
-      {/* Suggested Prompts Pills */}
-      <div className="pt-2 pb-2">
-        <div className="text-[11px] uppercase tracking-wider text-zinc-500 font-semibold mb-1.5 px-1 flex items-center justify-between">
-          <span>Suggested Questions</span>
-          {!user.isPro && remainingAiMessages <= 0 && (
-            <span className="text-amber-400 text-xs normal-case font-medium flex items-center gap-1">
-              <Lock className="w-3 h-3" /> Daily limit reached
-            </span>
-          )}
+      {/* Daily Limit Exhausted Banner with Live Midnight Countdown */}
+      {isLimitReached && (
+        <div className="mb-3 p-4 rounded-2xl bg-zinc-900/90 border border-amber-500/30 text-center space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div className="flex items-center justify-center gap-2 text-amber-400 text-xs font-semibold">
+            <Clock className="w-4 h-4" />
+            <span>Daily chat limit reached</span>
+          </div>
+          <p className="text-xs text-zinc-300 max-w-md mx-auto">
+            You've used all 5 chats for today. Your next set of chats will be available tomorrow.
+          </p>
+
+          <div className="pt-1">
+            <div className="text-[11px] uppercase tracking-wider text-zinc-400 font-semibold mb-1">
+              Next chats available in
+            </div>
+            <div className="inline-block px-4 py-1.5 rounded-xl bg-zinc-950 border border-white/10 text-base sm:text-lg font-mono font-bold text-[#ffcf07] tracking-wider tabular-nums shadow-inner">
+              {formattedCountdown}
+            </div>
+          </div>
         </div>
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-          {SUGGESTED_QUESTIONS.map((q) => (
-            <button
-              key={q}
-              onClick={() => handleSend(q)}
-              disabled={isTyping || (!user.isPro && remainingAiMessages <= 0)}
-              className="text-xs px-3 py-1.5 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-white/8 hover:border-white/15 text-zinc-300 hover:text-white transition whitespace-nowrap disabled:opacity-40 cursor-pointer"
-            >
-              {q}
-            </button>
-          ))}
+      )}
+
+      {/* Suggested Questions (Visible when limit is not reached) */}
+      {!isLimitReached && (
+        <div className="pt-1 pb-2">
+          <div className="text-[11px] uppercase tracking-wider text-zinc-500 font-semibold mb-1.5 px-1">
+            Suggested Prompts
+          </div>
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+            {SUGGESTED_QUESTIONS.map((q) => (
+              <button
+                key={q}
+                onClick={() => handleSend(q)}
+                disabled={isTyping || isLimitReached}
+                className="text-xs px-3 py-1.5 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-white/8 hover:border-white/15 text-zinc-300 hover:text-white transition whitespace-nowrap disabled:opacity-40 cursor-pointer"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Chat Input Bar */}
       <form
@@ -251,20 +289,20 @@ export const AiAssistantView: React.FC = () => {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={
-            !user.isPro && remainingAiMessages <= 0
-              ? 'Daily free limit reached. Upgrade to Pro to continue...'
-              : 'Ask anything about saving, pacing, or reaching your goal...'
+            isLimitReached
+              ? 'Daily limit of 5 reached. Resets at midnight...'
+              : 'Ask anything about pacing, weekly savings, or reaching your goal...'
           }
-          disabled={!user.isPro && remainingAiMessages <= 0}
-          className="flex-1 bg-zinc-900/90 border border-white/10 rounded-2xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500/80 transition disabled:opacity-50"
+          disabled={isLimitReached}
+          className="flex-1 bg-zinc-900/90 border border-white/10 rounded-2xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#ffcf07] transition disabled:opacity-50 disabled:cursor-not-allowed"
         />
 
         <button
           type="submit"
-          disabled={!input.trim() || isTyping || (!user.isPro && remainingAiMessages <= 0)}
-          className="p-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold disabled:opacity-40 transition cursor-pointer shadow-md shadow-emerald-500/10 shrink-0"
+          disabled={!input.trim() || isTyping || isLimitReached}
+          className="p-3 rounded-2xl bg-[#ffcf07] hover:bg-yellow-400 text-zinc-950 font-bold disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer shadow-md shadow-[#ffcf07]/15 shrink-0 active:scale-95"
         >
-          <Send className="w-4 h-4" />
+          <Send className="w-4 h-4 stroke-[2.5]" />
         </button>
       </form>
     </div>

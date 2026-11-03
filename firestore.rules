@@ -12,19 +12,7 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, write: if isOwner(userId);
 
-      match /goals/{goalId} {
-        allow read, write: if isOwner(userId);
-      }
-
-      match /ai_chats/{chatId} {
-        allow read, write: if isOwner(userId);
-      }
-
-      match /settings/{settingId} {
-        allow read, write: if isOwner(userId);
-      }
-
-      match /payments/{paymentId} {
+      match /{allChildren=**} {
         allow read, write: if isOwner(userId);
       }
     }

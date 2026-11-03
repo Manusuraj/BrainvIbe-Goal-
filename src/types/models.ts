@@ -40,6 +40,7 @@ export enum AuthStage {
 }
 
 export type GoalCycle = 'Weekly' | 'Monthly' | 'Yearly';
+export type GoalStatus = 'active' | 'completed' | 'overdue';
 
 export interface GoalTransaction {
   id: string;
@@ -54,12 +55,13 @@ export interface GoalItem {
   description: string;
   goalAmount: number;
   amountSaved: number;
-  targetDate: string;
+  targetDate: string; // ISO string with date and time
   createdAt: string;
   paymentFrequency: GoalCycle;
   completed: boolean;
   completedDate?: string;
   category?: string;
+  status?: GoalStatus;
   transactions: GoalTransaction[];
 }
 
@@ -78,17 +80,17 @@ export interface UserProfile {
   name: string;
   email: string;
   avatarUrl: string;
-  isPro: boolean;
-  planName: 'Free Plan' | 'Premium Annual' | 'Pro Monthly' | 'Pro Yearly' | string;
-  subscriptionStatus: 'active' | 'expired' | 'none';
+  dailyAiCount: number;
+  dailyAiDate: string; // YYYY-MM-DD
+  timezone?: string;
+  isPro?: boolean;
+  planName?: string;
+  subscriptionStatus?: 'active' | 'expired' | 'none';
   subscriptionActivatedAt?: string;
   subscriptionExpiry?: string;
   lastPaymentId?: string;
-  dailyAiCount: number;
-  dailyAiDate: string;
-  monthlyAiCount: number;
-  monthlyAiMonth: string;
-  // Optional legacy fields for seamless transition
+  monthlyAiCount?: number;
+  monthlyAiMonth?: string;
   phoneNumber?: string;
   city?: string;
   country?: string;
@@ -114,6 +116,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
+  createdAt?: string;
 }
 
 export interface ToastMessage {

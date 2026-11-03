@@ -1,4 +1,5 @@
-import express, { Request, Response } from 'express';
+import express from 'express';
+import type { Request, Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
@@ -37,205 +38,213 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 // Middleware
 app.use(express.json());
 
-// Razorpay Test Mode Credentials
-// Strict rule: Test mode (rzp_test_...) is enforced in preview testing
-const rawKey = process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || '';
-let resolvedKeyId = rawKey.startsWith('rzp_test_')
-  ? rawKey
-  : rawKey.startsWith('rzp_live_')
-  ? rawKey.replace('rzp_live_', 'rzp_test_')
-  : 'rzp_test_TuF1pkcEw6oj5U';
+// ---------------------------------------------------------------------------
+// Server-Side Daily Chat Usage & Quota Enforcement
+// Strict Rule: Exactly 5 chat messages per user per day, resetting at local midnight.
+// ---------------------------------------------------------------------------
 
-if (!resolvedKeyId.startsWith('rzp_test_')) {
-  resolvedKeyId = 'rzp_test_TuF1pkcEw6oj5U';
+interface UserChatUsage {
+  date: string; // YYYY-MM-DD in user's timezone
+  count: number; // number of chats consumed today (max 5)
+  lastUpdated: string;
 }
 
-export const RAZORPAY_KEY_ID = resolvedKeyId;
+const chatUsageStore = new Map<string, UserChatUsage>();
 
-// Server-side Secret: Exclusively available on backend; NEVER exposed to VITE / client
-const rawSecret =
-  process.env.RAZORPAY_KEY_SECRET ||
-  (process.env.VITE_RAZORPAY_KEY_ID && !process.env.VITE_RAZORPAY_KEY_ID.startsWith('rzp_')
-    ? process.env.VITE_RAZORPAY_KEY_ID
-    : '');
-export const RAZORPAY_KEY_SECRET = rawSecret || '78HBAba2TQUH0Nime1R0Abna';
+function getLocalDateStringInTimezone(date: Date, timezone: string): string {
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    return formatter.format(date);
+  } catch {
+    return date.toISOString().slice(0, 10);
+  }
+}
 
-export const PLAN_AMOUNT_PAISE = 49900; // ₹499.00
-export const PLAN_NAME = 'Premium Annual';
+function calculateMidnightReset(now: Date, timezone: string): { resetAt: Date; secondsUntilReset: number } {
+  try {
+    const tzFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+      hour12: false,
+    });
 
-console.log(`[Razorpay Server Config] Mode: TEST, Key ID: ${RAZORPAY_KEY_ID}, Secret Present: ${Boolean(RAZORPAY_KEY_SECRET)}`);
+    const parts = tzFormatter.formatToParts(now);
+    const getPart = (type: string) => Number(parts.find((p) => p.type === type)?.value || 0);
+    const localHour = getPart('hour') % 24;
+    const localMinute = getPart('minute');
+    const localSecond = getPart('second');
+
+    const secondsPassedToday = localHour * 3600 + localMinute * 60 + localSecond;
+    const secondsUntilReset = Math.max(1, 86400 - secondsPassedToday);
+    const resetAt = new Date(now.getTime() + secondsUntilReset * 1000);
+
+    return { resetAt, secondsUntilReset };
+  } catch {
+    const fallbackSec = 3600;
+    return { resetAt: new Date(now.getTime() + fallbackSec * 1000), secondsUntilReset: fallbackSec };
+  }
+}
 
 // Health check endpoint
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
     service: 'BrainVibe Goal App Server',
-    paymentMode: 'test',
-    keyId: RAZORPAY_KEY_ID,
+    chatLimitPerDay: 5,
+    proPlanEnabled: false,
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
   });
 });
 
-// Config endpoint for client (Public only - never expose secret)
-app.get('/api/payment/config', (_req: Request, res: Response) => {
-  res.json({
-    keyId: RAZORPAY_KEY_ID,
-    mode: 'test',
-    amount: PLAN_AMOUNT_PAISE,
-    currency: 'INR',
-    planName: PLAN_NAME,
-    priceDisplay: '₹499/year',
-  });
-});
-
-// Create Order endpoint (Authenticated with Razorpay Test Mode API)
-app.post('/api/payment/create-order', async (req: Request, res: Response) => {
+// Check daily chat quota
+app.post('/api/chat/quota', (req: Request, res: Response) => {
   try {
-    const { uid, email, name } = req.body || {};
-    const receiptId = `rcpt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-
-    // 1. Attempt official Razorpay Test Order creation
-    if (RAZORPAY_KEY_SECRET && RAZORPAY_KEY_ID.startsWith('rzp_test_')) {
-      try {
-        const authHeader =
-          'Basic ' + Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64');
-
-        const rzpResponse = await fetch('https://api.razorpay.com/v1/orders', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: authHeader,
-          },
-          body: JSON.stringify({
-            amount: PLAN_AMOUNT_PAISE,
-            currency: 'INR',
-            receipt: receiptId,
-            notes: {
-              environment: 'ai-studio-preview',
-              mode: 'test',
-              plan: PLAN_NAME,
-              uid: uid || 'anonymous',
-              email: email || '',
-              name: name || '',
-            },
-          }),
-        });
-
-        if (rzpResponse.ok) {
-          const rzpOrder = await rzpResponse.json();
-          console.log('[Razorpay Test API] Gateway order created successfully:', rzpOrder.id);
-          return res.json({
-            success: true,
-            orderId: rzpOrder.id,
-            amount: rzpOrder.amount || PLAN_AMOUNT_PAISE,
-            currency: rzpOrder.currency || 'INR',
-            keyId: RAZORPAY_KEY_ID,
-            planName: PLAN_NAME,
-            receipt: receiptId,
-            mode: 'test',
-            isRegisteredOnGateway: true,
-          });
-        }
-
-        const errText = await rzpResponse.text();
-        console.warn('[Razorpay Test API] Gateway responded with non-200:', rzpResponse.status, errText);
-      } catch (apiErr) {
-        console.warn('[Razorpay Test API] Network error calling gateway:', apiErr);
-      }
-    }
-
-    // 2. Fallback test order generator (compliant with standard order_ + 14 chars pattern)
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let suffix = '';
-    for (let i = 0; i < 14; i++) {
-      suffix += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    const testOrderId = `order_${suffix}`;
-
-    console.log('[Payment Test Order] Generated preview test order:', testOrderId);
-    return res.json({
-      success: true,
-      orderId: testOrderId,
-      amount: PLAN_AMOUNT_PAISE,
-      currency: 'INR',
-      keyId: RAZORPAY_KEY_ID,
-      planName: PLAN_NAME,
-      receipt: receiptId,
-      mode: 'test',
-      isRegisteredOnGateway: false,
-    });
-  } catch (err: any) {
-    console.error('Error creating order:', err);
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to create payment order. Please try again.',
-      message: err.message,
-    });
-  }
-});
-
-// Verify Payment endpoint
-app.post('/api/payment/verify-payment', (req: Request, res: Response) => {
-  try {
-    const { razorpay_payment_id, razorpay_order_id, razorpay_signature, uid } = req.body || {};
-
-    if (!razorpay_payment_id) {
-      return res.status(400).json({
-        success: false,
-        verified: false,
-        error: 'Missing razorpay_payment_id',
-      });
-    }
-
-    // Cryptographic signature verification if signature is present
-    let signatureVerified = true;
-    if (razorpay_signature && razorpay_order_id && RAZORPAY_KEY_SECRET) {
-      try {
-        const expectedSignature = crypto
-          .createHmac('sha256', RAZORPAY_KEY_SECRET)
-          .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-          .digest('hex');
-        signatureVerified = expectedSignature === razorpay_signature;
-      } catch (sigErr) {
-        console.warn('[Payment Verification] Signature calculation note:', sigErr);
-      }
+    const { uid, timezone = 'Asia/Kolkata' } = req.body || {};
+    if (!uid) {
+      return res.status(400).json({ success: false, error: 'User UID is required' });
     }
 
     const now = new Date();
-    const activatedAt = now.toISOString();
-    const expiresAt = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
+    const today = getLocalDateStringInTimezone(now, timezone);
+    const { resetAt, secondsUntilReset } = calculateMidnightReset(now, timezone);
 
-    console.log(`[Payment Verified] ID: ${razorpay_payment_id}, UID: ${uid || 'guest'}, Status: Active Premium`);
+    const record = chatUsageStore.get(uid);
+    let count = 0;
+
+    if (record && record.date === today) {
+      count = Math.min(5, record.count);
+    } else {
+      chatUsageStore.set(uid, {
+        date: today,
+        count: 0,
+        lastUpdated: now.toISOString(),
+      });
+    }
+
+    const remaining = Math.max(0, 5 - count);
 
     return res.json({
       success: true,
-      verified: signatureVerified,
-      paymentId: razorpay_payment_id,
-      orderId: razorpay_order_id || null,
-      mode: 'test',
-      planName: PLAN_NAME,
-      amount: 499,
-      amountPaise: PLAN_AMOUNT_PAISE,
-      currency: 'INR',
-      activatedAt,
-      expiresAt,
-      uid: uid || null,
-      benefits: [
-        'Completely ad-free experience',
-        '100 AI chat messages per month',
-        'Personal data backup and restore',
-        'Priority milestone intelligence',
-      ],
+      allowed: remaining > 0,
+      totalLimit: 5,
+      usedToday: count,
+      remaining,
+      date: today,
+      timezone,
+      resetAtIso: resetAt.toISOString(),
+      secondsUntilReset,
     });
   } catch (err: any) {
-    console.error('Error verifying payment:', err);
-    return res.status(500).json({
-      success: false,
-      verified: false,
-      error: 'Failed to verify payment',
-    });
+    return res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// Consume 1 chat message credit (Atomic server check)
+app.post('/api/chat/consume', (req: Request, res: Response) => {
+  try {
+    const { uid, timezone = 'Asia/Kolkata' } = req.body || {};
+    if (!uid) {
+      return res.status(400).json({ success: false, error: 'User UID is required' });
+    }
+
+    const now = new Date();
+    const today = getLocalDateStringInTimezone(now, timezone);
+    const { resetAt, secondsUntilReset } = calculateMidnightReset(now, timezone);
+
+    const record = chatUsageStore.get(uid);
+    let currentCount = 0;
+
+    if (record && record.date === today) {
+      currentCount = record.count;
+    }
+
+    if (currentCount >= 5) {
+      return res.status(429).json({
+        success: false,
+        error: "You've used all 5 chats for today. Your next set of chats will be available tomorrow.",
+        remaining: 0,
+        usedToday: 5,
+        totalLimit: 5,
+        resetAtIso: resetAt.toISOString(),
+        secondsUntilReset,
+      });
+    }
+
+    const newCount = currentCount + 1;
+    chatUsageStore.set(uid, {
+      date: today,
+      count: newCount,
+      lastUpdated: now.toISOString(),
+    });
+
+    const remaining = Math.max(0, 5 - newCount);
+
+    return res.json({
+      success: true,
+      allowed: true,
+      remaining,
+      usedToday: newCount,
+      totalLimit: 5,
+      date: today,
+      resetAtIso: resetAt.toISOString(),
+      secondsUntilReset,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Refund 1 credit if message processing failed
+app.post('/api/chat/refund', (req: Request, res: Response) => {
+  try {
+    const { uid, timezone = 'Asia/Kolkata' } = req.body || {};
+    if (!uid) {
+      return res.status(400).json({ success: false, error: 'User UID is required' });
+    }
+
+    const now = new Date();
+    const today = getLocalDateStringInTimezone(now, timezone);
+    const record = chatUsageStore.get(uid);
+
+    if (record && record.date === today && record.count > 0) {
+      record.count = Math.max(0, record.count - 1);
+      record.lastUpdated = now.toISOString();
+      chatUsageStore.set(uid, record);
+    }
+
+    const currentCount = record?.date === today ? record.count : 0;
+    const { resetAt, secondsUntilReset } = calculateMidnightReset(now, timezone);
+
+    return res.json({
+      success: true,
+      refunded: true,
+      remaining: Math.max(0, 5 - currentCount),
+      usedToday: currentCount,
+      resetAtIso: resetAt.toISOString(),
+      secondsUntilReset,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Pro subscription model removed — endpoints respond with disabled notification
+app.all(['/api/payment/config', '/api/payment/create-order', '/api/payment/verify-payment'], (_req: Request, res: Response) => {
+  res.status(200).json({
+    proPlanActive: false,
+    message: 'Pro plan subscription is currently discontinued. All users have equal access with 5 daily AI chats.',
+  });
 });
 
 // Vite Middleware Setup
@@ -257,7 +266,7 @@ async function startServer() {
   } else {
     const distPath = path.resolve(__dirname, 'dist');
     app.use(express.static(distPath));
-    app.get('*', (_req: Request, res: Response) => {
+    app.use((_req: Request, res: Response) => {
       res.sendFile(path.resolve(distPath, 'index.html'));
     });
   }

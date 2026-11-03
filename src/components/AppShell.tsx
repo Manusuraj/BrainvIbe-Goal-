@@ -3,7 +3,6 @@ import {
   AlertCircle,
   Bot,
   CheckCircle2,
-  Crown,
   HelpCircle,
   Info,
   LogOut,
@@ -14,12 +13,10 @@ import {
   Target,
   User,
   X,
-  Zap,
 } from 'lucide-react';
 import { useBrainVibe } from '../context/BrainVibeContext';
 import { MainTab, SubScreen } from '../types/models';
 import { formatINR } from '../utils/formatters';
-import { ProUpgradeModal } from '../views/ProUpgradeModal';
 import { TutorialModal } from '../views/TutorialModal';
 
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -35,7 +32,6 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
     openTutorial,
     completeTutorial,
     openEmailSupport,
-    openSubScreen,
     toasts,
     dismissToast,
     remainingAiMessages,
@@ -51,7 +47,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
       tab: MainTab.Assistant,
       label: 'BrainVibe AI',
       icon: Sparkles,
-      badge: !user.isPro ? `${remainingAiMessages}/5 left` : `${remainingAiMessages}/100 left`,
+      badge: `${remainingAiMessages}/5 left`,
     },
     {
       tab: MainTab.Settings,
@@ -77,11 +73,6 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
               <div>
                 <div className="text-base font-bold tracking-tight text-white flex items-center gap-1.5">
                   Goal App
-                  {user.isPro && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#ffcf07] text-zinc-950 flex items-center gap-0.5">
-                      <Crown className="w-2.5 h-2.5" /> PRO
-                    </span>
-                  )}
                 </div>
                 <p className="text-[11px] text-zinc-400">Financial Pacing & Savings</p>
               </div>
@@ -140,13 +131,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                   </div>
 
                   {item.badge && (
-                    <span
-                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                        user.isPro
-                          ? 'bg-[#ffcf07]/15 text-[#ffcf07]'
-                          : 'bg-white/8 text-zinc-400'
-                      }`}
-                    >
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/8 text-zinc-300">
                       {item.badge}
                     </span>
                   )}
@@ -185,51 +170,15 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
               </div>
               <div className="min-w-0">
                 <div className="text-xs font-bold text-white truncate">{user.name || 'Friend'}</div>
-                <div className="text-[10px] text-zinc-400 truncate">{user.planName}</div>
+                <div className="text-[10px] text-zinc-400 truncate">{user.email || 'Free Account'}</div>
               </div>
             </div>
-
-            {!user.isPro ? (
-              <button
-                onClick={() => openSubScreen(SubScreen.ProUpgrade)}
-                className="text-[11px] font-bold text-[#ffcf07] hover:underline cursor-pointer flex items-center gap-1"
-              >
-                <Crown className="w-3 h-3 fill-[#ffcf07]" /> Upgrade ₹499
-              </button>
-            ) : (
-              <span className="text-[10px] font-bold text-[#ffcf07] flex items-center gap-1">
-                <Crown className="w-3 h-3 fill-[#ffcf07]" /> Premium
-              </span>
-            )}
           </div>
         </div>
       </aside>
 
       {/* Main Content Area */}
       <div className="flex-1 lg:pl-72 flex flex-col min-h-screen pb-32 sm:pb-36 lg:pb-12 overflow-x-hidden">
-        {/* Ad Placement (Disabled for Active Premium Subscribers) */}
-        {!user.isPro && (
-          <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-3">
-            <div className="px-3.5 py-2.5 rounded-2xl bg-zinc-900/60 border border-white/6 flex items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-white/10 text-zinc-400 shrink-0">
-                  Sponsor
-                </span>
-                <span className="text-zinc-300 truncate text-[11px] sm:text-xs">
-                  Smart Wealth SIPs & Liquid Mutual Funds • Zero commission direct plans
-                </span>
-              </div>
-              <button
-                onClick={() => openSubScreen(SubScreen.ProUpgrade)}
-                className="text-[11px] font-bold text-[#ffcf07] hover:underline shrink-0 cursor-pointer flex items-center gap-1"
-              >
-                <span>Remove Ads</span>
-                <span className="text-[10px] text-zinc-400 font-normal hidden sm:inline">(₹499/yr)</span>
-              </button>
-            </div>
-          </div>
-        )}
-
         <main className="flex-1 w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-5 pb-8">
           {children}
         </main>
@@ -263,7 +212,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                   {item.label}
                 </span>
 
-                {item.badge && !user.isPro && (
+                {item.badge && (
                   <span className="absolute top-1 right-5 w-2 h-2 rounded-full bg-[#ffcf07]" />
                 )}
               </button>
@@ -273,10 +222,6 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
       </nav>
 
       {/* Global Modals */}
-      {subScreen === SubScreen.ProUpgrade && (
-        <ProUpgradeModal onClose={closeSubScreen} />
-      )}
-
       {subScreen === SubScreen.Tutorial && (
         <TutorialModal onClose={completeTutorial} />
       )}
