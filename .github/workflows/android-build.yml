@@ -17,8 +17,14 @@ permissions:
 
 jobs:
   android:
-    name: Build BrainVibe APK and AAB
+    name: Build signed BrainVibe APK and AAB
     runs-on: ubuntu-latest
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -26,7 +32,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: npm
 
       - name: Set up Java
@@ -35,32 +41,97 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - name: Install Android SDK components
+        uses: android-actions/setup-android@v3
+
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
       - name: Build web application
         run: npm run build
 
-      - name: Generate Android project
+      - name: Generate and sync Capacitor Android project
         run: |
           if [ ! -d android ]; then
             npx cap add android
           fi
           npx cap sync android
 
-      - name: Build installable debug APK
-        working-directory: android
-        run: ./gradlew assembleDebug
+      - name: Validate Android signing secrets
+        shell: bash
+        run: |
+          missing=0
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing GitHub Actions secret: $name"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Add all four Android signing secrets under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
 
-      - name: Build release AAB
+      - name: Decode release keystore
+        shell: bash
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/brainvibe-upload-key.jks"
+          test -s "$RUNNER_TEMP/brainvibe-upload-key.jks"
+
+      - name: Build debug APK and unsigned release outputs
         working-directory: android
-        run: ./gradlew bundleRelease
+        run: ./gradlew assembleDebug assembleRelease bundleRelease
+
+      - name: Sign release APK and AAB
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$SDK_ROOT" ]; then
+            echo "::error::Android SDK path was not found."
+            exit 1
+          fi
+
+          BUILD_TOOLS_VERSION="$(ls "$SDK_ROOT/build-tools" | sort -V | tail -n 1)"
+          BUILD_TOOLS="$SDK_ROOT/build-tools/$BUILD_TOOLS_VERSION"
+          KEYSTORE="$RUNNER_TEMP/brainvibe-upload-key.jks"
+          UNSIGNED_APK="android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          UNSIGNED_AAB="android/app/build/outputs/bundle/release/app-release.aab"
+
+          test -f "$UNSIGNED_APK"
+          test -f "$UNSIGNED_AAB"
+
+          cp android/app/build/outputs/apk/debug/app-debug.apk artifacts/BrainVibe-debug.apk
+
+          "$BUILD_TOOLS/zipalign" -f -v 4 "$UNSIGNED_APK" "$RUNNER_TEMP/brainvibe-release-aligned.apk"
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks "$KEYSTORE" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --key-pass env:ANDROID_KEY_PASSWORD \
+            --out artifacts/BrainVibe-release.apk \
+            "$RUNNER_TEMP/brainvibe-release-aligned.apk"
+
+          jarsigner \
+            -keystore "$KEYSTORE" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -keypass "$ANDROID_KEY_PASSWORD" \
+            -signedjar artifacts/BrainVibe-release.aab \
+            "$UNSIGNED_AAB" \
+            "$ANDROID_KEY_ALIAS"
+
+          "$BUILD_TOOLS/apksigner" verify --verbose artifacts/BrainVibe-release.apk
+          jarsigner -verify artifacts/BrainVibe-release.aab
 
       - name: Upload Android builds
         uses: actions/upload-artifact@v4
         with:
           name: brainvibe-android-builds
           if-no-files-found: error
+          retention-days: 30
           path: |
-            android/app/build/outputs/apk/debug/app-debug.apk
-            android/app/build/outputs/bundle/release/app-release.aab
+            artifacts/BrainVibe-debug.apk
+            artifacts/BrainVibe-release.apk
+            artifacts/BrainVibe-release.aab
